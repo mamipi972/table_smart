@@ -1,10 +1,18 @@
 # Gestionnaire multi-feuilles
 
+> Tableur local en un fichier HTML : import Excel et CSV, saisie, colonnes calculées
+> proposées, sauvegarde par document, aucune requête réseau.
+
+*[English version below](#english).*
+
 Tableur de poche en un seul fichier HTML : import `.xlsx` / `.xls` / `.ods` / `.csv`,
 saisie, recherche, tri, journal des modifications, export, et sauvegarde automatique
 dans le navigateur ou directement dans un fichier du disque.
 
 Tout se passe en local : aucun serveur, aucune requête réseau, rien ne sort de la machine.
+
+Le texte en exergue ci-dessus est celui du champ « About » du dépôt. Sujets suggérés :
+`spreadsheet`, `xlsx`, `csv`, `sheetjs`, `single-file`, `offline-first`, `vanilla-js`, `french`.
 
 ## Mise en route
 
@@ -170,3 +178,147 @@ node tests/test.js
 
 Le script fabrique ses fichiers d'essai, sert la page sur un port local et rend la main
 avec un code de sortie non nul au premier échec.
+
+
+---
+
+## English
+
+> Local single-file HTML spreadsheet: Excel and CSV import, data entry, suggested
+> computed columns, per-document autosave, no network requests.
+
+A pocket spreadsheet in one HTML file: import `.xlsx` / `.xls` / `.ods` / `.csv`, enter
+and edit rows, search, sort, keep a change log, export, and autosave either into the
+browser or straight into a file on disk. Everything runs locally — no server, no network
+request, nothing leaves the machine. The interface itself is in French.
+
+### Getting started
+
+1. Put `xlsx.full.min.js` (SheetJS 0.20.3) **next to** `tableur.html`.
+2. Open `tableur.html`.
+
+The CDN fallback is gone (see [The CDN](#the-cdn)). Without the library, CSV import, data
+entry and browser autosave still work; `.xlsx`, `.xls` and `.ods` are disabled and a red
+banner says so.
+
+Serving the page from a small local server (`npx http-server`) rather than opening it as
+`file://` properly isolates browser storage: under `file://`, depending on the browser,
+every local HTML file shares the same storage area.
+
+#### Single-file variant
+
+To carry a single file, the library can be copied **into** the page:
+
+```sh
+node outils/integrer-xlsx.js                       # expects ./xlsx.full.min.js
+node outils/integrer-xlsx.js --lib ~/xlsx.full.min.js --sortie tableur-autonome.html
+```
+
+The result opens on its own — from a USB stick or an email attachment — with no
+neighbouring file and no network. The trade-off is about **1 MB** (126 KB page, 860 KB
+library) and a rebuild on every SheetJS update. The tool escapes `</script` sequences and
+refuses to write if the library contains a line starting with `-->`, which would be read
+as a comment once inlined. The generated file passes the same test suite:
+`TABLEUR=tableur-autonome.html node tests/test.js`.
+
+### What was fixed
+
+**Data loss on import — the main one.** Import now asks before touching an open session and
+offers *replace* or *add the sheets alongside* (merge, nothing overwritten). The undo stack
+is no longer cleared: **Ctrl+Z brings the previous session back**, document label included.
+The previous document's saved copy is no longer overwritten either.
+
+**Local save.** One entry per document (`tableur.session.v4::<name>|<size>|<date>`) instead
+of a single key, so working on file B no longer erases file A's session; the old
+`tableur.session.v3` key is migrated on first start. A *saved sessions* list shows each
+backup with the **size and date of the source file**, which finally tells two `clients.xlsx`
+from different folders apart; each row restores or deletes on its own. **Concurrent tabs**
+are detected through a timestamped lock plus a `BroadcastChannel`: the second tab suspends
+its autosave, says so, and offers to take over — same warning when two tabs link the same
+file on disk. When the **quota is reached**, a permanent red banner, a red dot, a
+`NON ENREGISTRÉ` status and an explicit alert replace the old line tucked into a corner of
+the status bar, after one automatic retry without the change log.
+
+**Closing the tab.** The warning now covers **pending writes** (500 ms locally, 1.2 s to
+disk), including when a file is linked — precisely the case that used to lose the last
+entry silently. `pagehide` and going to the background force an immediate local save.
+
+**Numeric conversion.** Columns with a **leading zero** (postcode `01234`, phone number
+`0612345678`) and those beyond **fifteen significant digits** stay text, and the import
+reports it column by column; the file is read twice (native values plus displayed text) to
+recover the `01234` of a formatted numeric cell. Typing a leading-zero value into a number
+column offers to switch the column to text instead of damaging the value, and turning a
+column into numbers warns how many values would be damaged.
+
+**Details.** Off-schema columns are **re-attached** (import, restore, export) instead of
+being dropped at export time. Sheet names are truncated to 31 characters **and then made
+unique** (case-insensitive, like Excel), so near-identical names no longer break the export.
+Latin-1 CSV files are **detected** (strict UTF-8, otherwise Windows-1252) and the encoding
+used is announced; the separator (`;` `,` tab `|`) is guessed. **CSV injection**: cells
+starting with `=`, `+`, `-` or `@` are prefixed with an apostrophe on export (a checkbox in
+the export dialog turns it off), headers included. A `__proto__`, `constructor` or
+`prototype` column is renamed on import (`proto_`, …) so its values no longer vanish, and no
+cell read goes through the prototype chain. Exported files carry the document name and a
+timestamp (`clients_2026-09-14_1530.xlsx`), and CSVs of one batch are numbered, so
+`Ventes/2025` and `Ventes_2025` no longer produce the same file. The linked file shows its
+size, and *Situer le dossier…* resolves the **full path** once you point at the parent
+folder — the browser never gives it away on its own.
+
+#### The CDN
+
+The `cdn.sheetjs.com` fallback was **removed**. Without an `integrity` attribute, a
+compromised CDN would get access to every piece of data on the page and, in linked mode,
+write access to the file on disk. The header of `tableur.html` documents how to restore the
+fallback with an SRI hash. On top of that, the library is checked at runtime
+(`xlsxReady()`), which catches a local file that is present but corrupt — something
+`onerror` let through — and **export checks the library just like import does**.
+
+### Suggested computed columns (the “+ Colonne” button)
+
+The button opens a dialog suggesting calculations based on detected column types, each with
+a preview over the first rows:
+
+- two date columns → number of **days**, **months** or **years** between them (the “start”
+  column is recognised by its label, otherwise by the direction of the gaps);
+- two **year** columns (integers 1900–2100) → difference in years;
+- one date → year, month (YYYY-MM), quarter, age in days;
+- two numbers → difference, percentage, and product when the labels look like a quantity and
+  a price;
+- one number → share of the sheet total;
+- text → e-mail domain, concatenation of two columns.
+
+A computed column **recalculates itself** whenever its sources change, follows renames, and
+freezes into plain values if a source disappears or on request from the “⋮” menu.
+
+### Suggested sheets (the “+ Feuille” button)
+
+Same idea for sheets, as soon as **two rows share a value**:
+
+- one sheet per value of a categorical column (the source sheet is kept);
+- a summary sheet: one row per value, with row counts and sums of the numeric columns;
+- a summary by year or by month of a date column;
+- merging sheets that share the same structure, with an added “source sheet” column.
+
+### Known limits
+
+- The browser does not hand out the path of a chosen file: the folder only shows up after
+  pointing at it through *Situer le dossier…*.
+- An identifier longer than fifteen digits already stored as a **number** in the source file
+  arrived damaged before reaching the page; the column is protected as text, but the lost
+  digits were lost upstream.
+- Formula neutralisation also applies to a linked CSV file: a cell `=A1` is written `'=A1`
+  there. The checkbox in the export dialog turns it off.
+- Saving straight to disk only exists on Chrome and Edge (File System Access API).
+
+### Tests
+
+`tests/test.js` drives a real Chromium: import, typing, undo, concurrent tabs, quota,
+encoding, CSV injection, sheet names, computed columns and suggested groupings — 53 checks.
+
+```sh
+npm install playwright xlsx     # xlsx only builds the test fixtures
+node tests/test.js
+```
+
+The script builds its own fixtures, serves the page on a local port, and exits non-zero on
+the first failure.
