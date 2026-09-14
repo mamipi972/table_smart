@@ -21,12 +21,18 @@ function serve() {
   return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
 
+// TABLEUR=chemin/page.html permet d'essayer une autre page, par exemple celle
+// fabriquee par outils/integrer-xlsx.js, qui embarque deja la librairie.
 function prepare() {
+  const page = path.resolve(process.env.TABLEUR || path.join(__dirname, '..', 'tableur.html'));
   fs.mkdirSync(dir, { recursive: true });
-  fs.copyFileSync(path.join(__dirname, '..', 'tableur.html'), path.join(dir, 'index.html'));
-  const lib = path.join(path.dirname(require.resolve('xlsx')), 'dist', 'xlsx.full.min.js');
-  fs.copyFileSync(lib, path.join(dir, 'xlsx.full.min.js'));
+  fs.copyFileSync(page, path.join(dir, 'index.html'));
+  const libVoisine = path.join(dir, 'xlsx.full.min.js');
+  const integree = fs.readFileSync(page, 'utf8').includes('window.__xlsxInline = true');
+  if (integree) { if (fs.existsSync(libVoisine)) fs.unlinkSync(libVoisine); }
+  else fs.copyFileSync(path.join(path.dirname(require.resolve('xlsx')), 'dist', 'xlsx.full.min.js'), libVoisine);
   execFileSync(process.execPath, [path.join(__dirname, 'mkdata.js'), dir], { stdio: 'inherit' });
+  console.log('page essayee : ' + page + (integree ? ' (librairie integree)' : ' (librairie voisine)'));
 }
 let pass = 0, fail = 0;
 function check(name, cond, extra) {

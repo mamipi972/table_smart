@@ -15,4 +15,9 @@ node tests/test.js
 `xlsx.full.min.js` à la page ; l'application elle-même attend simplement ce fichier
 à côté de `tableur.html`.
 
+`TABLEUR=chemin/page.html node tests/test.js` fait passer la même suite à une autre
+page — par exemple `tableur-autonome.html`, fabriqué par `outils/integrer-xlsx.js` :
+la librairie voisine est alors retirée du dossier d'essai, ce qui vérifie que la page
+tient debout toute seule.
+
 Les fichiers temporaires sont écrits dans `tests/.tmp/site/`, ignoré par git.

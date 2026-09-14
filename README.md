@@ -20,6 +20,29 @@ Ouvrir la page depuis un petit serveur local (`npx http-server`) plutôt qu'en
 `file://` isole proprement le stockage du navigateur : en `file://`, selon le
 navigateur, tous les fichiers HTML locaux se partagent le même espace.
 
+### Variante en un seul fichier
+
+Pour n'avoir plus qu'un fichier à transporter, la librairie peut être recopiée
+**dans** la page :
+
+```sh
+node outils/integrer-xlsx.js                       # attend ./xlsx.full.min.js
+node outils/integrer-xlsx.js --lib ~/xlsx.full.min.js --sortie tableur-autonome.html
+```
+
+Le résultat s'ouvre seul, depuis une clé USB ou une pièce jointe, sans fichier
+voisin ni réseau. Contreparties : environ **1 Mo** (126 Ko pour la page, 860 Ko
+pour la librairie), et il faut refabriquer le fichier à chaque mise à jour de
+SheetJS. L'outil échappe les séquences `</script` et refuse d'écrire si la
+librairie contient une ligne débutant par `-->`, qui serait lue comme un
+commentaire une fois intégrée.
+
+Le fichier produit passe la même suite de tests :
+
+```sh
+TABLEUR=tableur-autonome.html node tests/test.js
+```
+
 ## Ce qui a été corrigé
 
 ### Perte de données à l'import — le point noir

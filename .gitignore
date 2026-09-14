@@ -2,3 +2,4 @@ node_modules/
 tests/.tmp/
 xlsx.full.min.js
 *.tgz
+tableur-autonome.html

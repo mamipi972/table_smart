@@ -18,12 +18,19 @@
 
   onerror ne couvre que l'absence du fichier ; un fichier présent mais corrompu
   se détecte après coup avec xlsxReady().
+
+  Pour obtenir un fichier unique, sans librairie à côté :
+      node outils/integrer-xlsx.js
+  remplace le bloc ci-dessous par la librairie elle-même.
 -->
+<!-- DEBUT chargement de la librairie -->
 <script>
+  window.__xlsxInline = false;
   window.__xlsxLoadError = false;
   function xlsxMissing() { window.__xlsxLoadError = true; }
 </script>
 <script src="xlsx.full.min.js" onerror="xlsxMissing()"></script>
+<!-- FIN chargement de la librairie -->
 
 <style>
   :root {
@@ -650,15 +657,21 @@ function xlsxReady() {
     typeof XLSX.write === 'function';
 }
 function libMessage() {
+  if (window.__xlsxInline)
+    return "La librairie intégrée à ce fichier HTML n'a pas pu être initialisée (fichier tronqué ou modifié).";
   return window.__xlsxLoadError
     ? "Le fichier xlsx.full.min.js est introuvable à côté de cette page."
     : "Le fichier xlsx.full.min.js est présent mais n'a pas pu être chargé (fichier incomplet ou corrompu).";
 }
+function libRemedy() {
+  return window.__xlsxInline
+    ? "Récupérez une copie complète de cette page."
+    : "Placez xlsx.full.min.js (SheetJS 0.20.3) dans le même dossier que cette page, puis rechargez.";
+}
 function ensureXlsx(what) {
   if (xlsxReady()) return true;
   showLibBanner();
-  alert(libMessage() + "\n\n" + (what || 'Cette action') +
-    " nécessite cette librairie. Placez xlsx.full.min.js (SheetJS 0.20.3) dans le même dossier que cette page, puis rechargez.\n\n" +
+  alert(libMessage() + "\n\n" + (what || 'Cette action') + " nécessite cette librairie. " + libRemedy() + "\n\n" +
     "L'import de fichiers CSV et la sauvegarde dans le navigateur restent disponibles sans elle.");
   return false;
 }
