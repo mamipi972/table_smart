@@ -1,0 +1,2963 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gestionnaire multi-feuilles</title>
+
+<!--
+  Librairie SheetJS : fichier local uniquement.
+
+  Le repli vers cdn.sheetjs.com a été supprimé : sans attribut integrity, un CDN
+  compromis obtiendrait l'accès à toutes les données de la page et, en mode lié,
+  au droit d'écriture sur le fichier du disque. La page ne fait donc plus aucune
+  requête réseau. Pour rétablir un repli, il faut le faire avec un hash SRI :
+
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"
+            integrity="sha384-..." crossorigin="anonymous"></script>
+
+  onerror ne couvre que l'absence du fichier ; un fichier présent mais corrompu
+  se détecte après coup avec xlsxReady().
+-->
+<script>
+  window.__xlsxLoadError = false;
+  function xlsxMissing() { window.__xlsxLoadError = true; }
+</script>
+<script src="xlsx.full.min.js" onerror="xlsxMissing()"></script>
+
+<style>
+  :root {
+    --canvas:#eaeef3; --surface:#ffffff; --line:#d7dde5; --line-soft:#eef1f5;
+    --ink:#1b2430; --ink-soft:#5c6b7f;
+    --accent:#2b5cd6; --ok:#1b8a4b; --warn:#9a6414; --danger:#b4232a;
+    --radius:6px;
+  }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body {
+    margin:0; padding:0; overflow:hidden;
+    font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size:14px; color:var(--ink); background:var(--canvas);
+  }
+
+  /* ---- structure : haut libre, tableau fixé sur les deux tiers bas ---- */
+  .app { display:flex; flex-direction:column; height:100%; }
+  .zone-top { flex:1 1 auto; min-height:0; overflow:auto; padding:12px 18px 14px; }
+  .zone-top-inner { max-width:1280px; margin:0 auto; }
+  .zone-data {
+    flex:0 0 66vh; min-height:240px; display:flex; flex-direction:column;
+    background:var(--surface); border-top:1px solid var(--line); box-shadow:0 -2px 10px rgba(20,30,45,.06);
+  }
+  .zone-data-inner { max-width:1280px; width:100%; margin:0 auto; padding:10px 18px 12px;
+    display:flex; flex-direction:column; min-height:0; flex:1 1 auto; }
+
+  header.topbar { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; margin-bottom:10px; }
+  header.topbar h1 { font-size:18px; margin:0; font-weight:600; }
+  header.topbar .file-name { color:var(--ink-soft); font-size:13px; margin-left:10px; }
+
+  .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-bottom:10px; }
+  .spacer { flex:1 1 auto; }
+
+  button { font:inherit; font-weight:600; padding:7px 12px; border:1px solid transparent;
+    border-radius:var(--radius); cursor:pointer; background:#e6eaf0; color:var(--ink); }
+  button:hover { filter:brightness(0.96); }
+  button:disabled { opacity:.45; cursor:not-allowed; filter:none; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  .btn-primary { background:var(--accent); color:#fff; }
+  .btn-ok { background:var(--ok); color:#fff; }
+  .btn-quiet { background:transparent; border-color:var(--line); color:var(--ink); }
+  .btn-danger { background:transparent; border-color:var(--line); color:var(--danger); }
+  .btn-icon { padding:4px 8px; font-size:13px; }
+  .badge { display:inline-block; min-width:20px; padding:1px 6px; margin-left:6px; border-radius:10px;
+    background:var(--accent); color:#fff; font-size:12px; }
+
+  input[type=text], input[type=date], input[type=number], select {
+    font:inherit; padding:7px 8px; border:1px solid var(--line); border-radius:var(--radius); background:#fff; color:var(--ink); }
+  input:disabled { background:#f1f4f8; color:var(--ink-soft); }
+  label.inline { color:var(--ink-soft); font-size:13px; }
+  .search { flex:1 1 220px; min-width:170px; }
+
+  /* ------------------------------------------------ bandeau d'état haut */
+  .control-row { display:flex; align-items:stretch; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+  .io-actions { flex:0 0 auto; align-items:center; }
+  .io-actions button { padding:9px 18px; }
+  .status { display:flex; align-items:center; gap:16px; flex-wrap:wrap; flex:1 1 380px;
+    background:var(--surface); border:1px solid var(--line); border-radius:8px;
+    padding:8px 12px; font-size:13px; color:var(--ink-soft); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#c3ccd8; margin-right:6px; vertical-align:middle; }
+  .dot.saved { background:var(--ok); } .dot.pending { background:var(--warn); }
+  .dot.off { background:#c3ccd8; } .dot.fail { background:var(--danger); }
+
+  /* -------------------------------------------------------- bandeaux */
+  .banner { display:none; gap:10px; align-items:center; flex-wrap:wrap;
+    background:#fff7e0; border:1px solid #e8d59a; border-radius:8px; padding:10px 12px; margin-bottom:10px; }
+  .banner.alert { background:#fdeaea; border-color:#e5a8a8; color:#7a1a1f; }
+  .banner.info { background:#eaf1fd; border-color:#b3c7ee; }
+  .banner strong { font-weight:700; }
+  .banner .banner-text { flex:1 1 320px; min-width:220px; }
+
+  .sheet-bar { display:none; }
+
+  /* ------------------------------------------------------------ tableau */
+  .data-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+  .data-head .count { color:var(--ink-soft); font-size:13px; }
+  .table-wrap { flex:1 1 auto; min-height:0; overflow:auto; border:1px solid var(--line); border-radius:var(--radius); }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:7px 10px; text-align:left; border-bottom:1px solid var(--line-soft); white-space:nowrap; }
+  th { background:#eef2f7; position:sticky; top:0; z-index:2; font-size:13px; border-bottom:1px solid var(--line); }
+  th .th-inner { display:flex; align-items:center; gap:6px; }
+  th .th-label { cursor:pointer; user-select:none; }
+  th .th-menu { border:none; background:transparent; padding:0 2px; cursor:pointer; color:var(--ink-soft); font-weight:700; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  td.calc { background:#f7faff; }
+  td.idx { color:var(--ink-soft); font-size:12px; text-align:right; width:1%; }
+  tbody tr:hover { background:#f6f9ff; }
+  td.editing { padding:2px 4px; }
+  td.editing input { width:100%; min-width:110px; }
+  mark { background:#ffe9a8; padding:0 1px; }
+  .empty { text-align:center; color:var(--ink-soft); padding:26px; }
+  .table-foot { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:8px; color:var(--ink-soft); font-size:13px; }
+
+  /* ------------------------------------------------------------- modales */
+  dialog.modal { padding:0; border:none; border-radius:10px; max-width:min(860px, 94vw); width:100%;
+    box-shadow:0 18px 50px rgba(15,25,40,.28); color:var(--ink); }
+  dialog.modal::backdrop { background:rgba(20,30,45,.45); }
+  dialog.modal .modal-head { display:flex; align-items:center; justify-content:space-between; gap:12px;
+    padding:14px 18px; border-bottom:1px solid var(--line-soft); }
+  dialog.modal .modal-head h2 { font-size:16px; margin:0; font-weight:600; }
+  dialog.modal .modal-body { padding:16px 18px; max-height:64vh; overflow:auto; }
+  dialog.modal .modal-foot { display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+    padding:12px 18px; border-top:1px solid var(--line-soft); background:#f8fafc; border-radius:0 0 10px 10px; }
+  .close-x { border:none; background:transparent; font-size:20px; line-height:1; padding:2px 6px; color:var(--ink-soft); }
+
+  .fields { display:flex; flex-wrap:wrap; gap:12px; }
+
+  .export-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:10px; }
+  .export-choice { display:flex; flex-direction:column; align-items:flex-start; gap:4px; text-align:left;
+    padding:12px 14px; background:#f8fafc; border:1px solid var(--line); border-radius:8px; font-weight:400; }
+  .export-choice:hover { background:#eef4ff; border-color:var(--accent); }
+  .export-choice strong { font-size:14px; }
+  .export-choice span { font-size:12.5px; color:var(--ink-soft); white-space:normal; }
+  .field { display:flex; flex-direction:column; flex:1 1 220px; }
+  .field label { font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:4px; }
+  .hint { color:var(--ink-soft); font-size:13px; }
+  .hint.warn { color:var(--warn); }
+
+  /* ------------------------------------------------------- suggestions */
+  .section-title { font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+    color:var(--ink-soft); margin:18px 0 8px; }
+  .section-title:first-child { margin-top:0; }
+  .sugg-list { display:grid; gap:8px; }
+  .sugg { display:flex; gap:12px; align-items:flex-start; justify-content:space-between;
+    border:1px solid var(--line); border-radius:8px; padding:10px 12px; background:#f8fafc; }
+  .sugg:hover { border-color:var(--accent); background:#f2f7ff; }
+  .sugg-main { min-width:0; }
+  .sugg-main h4 { margin:0 0 3px; font-size:13.5px; font-weight:600; }
+  .sugg-main p { margin:0; font-size:12.5px; color:var(--ink-soft); white-space:normal; }
+  .sugg-main .preview { margin-top:5px; font-size:12px; color:var(--ink-soft); font-variant-numeric:tabular-nums; white-space:normal; }
+  .sugg-actions { flex:0 0 auto; display:flex; gap:6px; align-items:center; }
+
+  .rows-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .rows-table th, .rows-table td { padding:6px 8px; border-bottom:1px solid var(--line-soft); white-space:normal; }
+  .rows-table th { background:#f1f5fa; position:static; }
+
+  .journal-list { list-style:none; margin:0; padding:0; }
+  .journal-list li { padding:6px 0; border-bottom:1px solid var(--line-soft); font-size:13px; }
+  .journal-list li:last-child { border-bottom:none; }
+  .journal-list time { color:var(--ink-soft); font-variant-numeric:tabular-nums; margin-right:8px; }
+  .journal-list .tag { display:inline-block; min-width:82px; font-weight:600; }
+  .tag-add { color:var(--ok); } .tag-edit { color:var(--warn); } .tag-del { color:var(--danger); } .tag-struct { color:var(--accent); }
+
+  #colMenu { position:absolute; z-index:50; display:none; background:#fff; border:1px solid var(--line);
+    border-radius:var(--radius); box-shadow:0 6px 18px rgba(20,30,45,.14); padding:4px; min-width:200px; }
+  #colMenu button { display:block; width:100%; text-align:left; background:transparent; border:none; padding:7px 10px; font-weight:500; }
+  #colMenu button:hover { background:var(--line-soft); }
+
+  @media (max-width:720px) {
+    .zone-top { padding:10px; } .zone-data-inner { padding:8px 10px 10px; }
+    .zone-data { flex-basis:62vh; }
+  }
+  @media (prefers-reduced-motion:reduce) { * { transition:none !important; } }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ============================ zone haute (un tiers, défilable) -->
+  <div class="zone-top">
+    <div class="zone-top-inner">
+
+      <header class="topbar">
+        <div>
+          <h1 style="display:inline-block">Gestionnaire multi-feuilles</h1>
+          <span class="file-name" id="fileName">Aucun fichier chargé</span>
+        </div>
+        <div class="bar">
+          <button class="btn-quiet" id="undoBtn" disabled title="Ctrl+Z">Annuler</button>
+          <button class="btn-quiet" id="openSessions">Sessions enregistrées</button>
+          <button class="btn-quiet" id="openJournal">Journal des modifications<span class="badge" id="journalCount">0</span></button>
+        </div>
+      </header>
+
+      <div class="control-row">
+        <div class="bar io-actions">
+          <button class="btn-primary" id="openImport">Importer</button>
+          <button class="btn-ok" id="openExport">Exporter</button>
+          <input type="file" id="fileUpload" accept=".xlsx,.xls,.ods,.csv,.tsv,.txt" hidden>
+        </div>
+
+        <div class="status">
+          <span><span class="dot off" id="lsDot"></span><span id="lsText">Sauvegarde automatique en attente de données</span></span>
+          <span><span class="dot off" id="fsDot"></span><span id="fsText">Aucun fichier lié</span></span>
+          <span class="spacer"></span>
+          <button class="btn-quiet btn-icon" id="linkFileBtn">Lier un fichier du disque</button>
+          <button class="btn-quiet btn-icon" id="locateFolderBtn" style="display:none" title="Indiquer le dossier pour afficher le chemin complet">Situer le dossier…</button>
+          <button class="btn-quiet btn-icon" id="unlinkFileBtn" style="display:none">Délier</button>
+        </div>
+      </div>
+
+      <!-- librairie absente ou incomplète -->
+      <div class="banner alert" id="libBanner">
+        <span class="banner-text" id="libText"></span>
+      </div>
+
+      <!-- quota localStorage atteint -->
+      <div class="banner alert" id="storageBanner">
+        <span class="banner-text" id="storageText"></span>
+        <button class="btn-primary" id="storageExportBtn">Exporter maintenant</button>
+        <button class="btn-quiet" id="storageSessionsBtn">Libérer de l'espace</button>
+        <button class="btn-quiet" id="storageRetryBtn">Réessayer</button>
+      </div>
+
+      <!-- un autre onglet travaille sur le même document / le même fichier -->
+      <div class="banner" id="tabBanner">
+        <span class="banner-text" id="tabText"></span>
+        <button class="btn-primary" id="tabTakeBtn">Prendre la main</button>
+        <button class="btn-quiet" id="tabIgnoreBtn">Continuer sans sauvegarde auto</button>
+      </div>
+
+      <!-- restauration d'une session enregistrée -->
+      <div class="banner" id="restoreBanner">
+        <span class="banner-text" id="restoreText"></span>
+        <button class="btn-primary" id="restoreBtn">Restaurer</button>
+        <button class="btn-quiet" id="otherSessionsBtn">Autres sessions…</button>
+        <button class="btn-quiet" id="discardBtn">Repartir de zéro</button>
+      </div>
+
+      <!-- compte rendu du dernier import -->
+      <div class="banner info" id="noteBanner">
+        <span class="banner-text" id="noteText"></span>
+        <button class="btn-quiet" id="noteCloseBtn">Fermer</button>
+      </div>
+
+      <div class="panel">
+        <div class="bar sheet-bar" id="sheetBar">
+          <select id="sheetSelect"></select>
+          <button class="btn-quiet btn-icon" id="addSheet" title="Nouvelle feuille">+ Feuille</button>
+          <button class="btn-quiet btn-icon" id="renameSheet">Renommer</button>
+          <button class="btn-danger btn-icon" id="deleteSheet">Supprimer</button>
+          <button class="btn-quiet btn-icon" id="addColumn">+ Colonne</button>
+          <input type="text" id="searchInput" class="search" placeholder="Rechercher dans cette feuille">
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ====================== zone basse fixe (deux tiers) : le tableau -->
+  <div class="zone-data">
+    <div class="zone-data-inner">
+
+      <div class="data-head">
+        <button class="btn-primary" id="openAdd">+ Ajouter une ligne</button>
+        <span class="count" id="rowCount"></span>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr id="tableHead"></tr></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+
+      <div class="table-foot">
+        <span class="spacer"></span>
+        <button class="btn-quiet btn-icon" id="prevPage">Précédent</button>
+        <span id="pageInfo"></span>
+        <button class="btn-quiet btn-icon" id="nextPage">Suivant</button>
+        <label class="inline">Lignes par page
+          <select id="pageSize">
+            <option>50</option><option selected>100</option><option>500</option><option value="0">toutes</option>
+          </select>
+        </label>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ================================================ modale de saisie -->
+<dialog class="modal" id="rowDialog">
+  <div class="modal-head">
+    <h2 id="rowDialogTitle">Ajouter une ligne</h2>
+    <button class="close-x" id="closeRowX" title="Fermer" aria-label="Fermer">×</button>
+  </div>
+  <div class="modal-body">
+    <input type="hidden" id="editIndex" value="-1">
+    <div id="fields" class="fields">
+      <span class="hint">Chargez un fichier .xlsx, .ods ou .csv pour générer le formulaire de saisie.</span>
+    </div>
+  </div>
+  <div class="modal-foot" id="formActions" style="display:none">
+    <button class="btn-primary" id="saveBtn">Ajouter la ligne</button>
+    <button class="btn-quiet" id="cancelBtn" style="display:none">Annuler la modification</button>
+    <button class="btn-quiet" id="closeRowBtn">Fermer</button>
+    <span class="hint" id="rowFeedback"></span>
+    <span class="hint">Entrée pour valider, Échap pour fermer.</span>
+  </div>
+</dialog>
+
+<!-- =============================================== modale de l'import -->
+<dialog class="modal" id="importDialog">
+  <div class="modal-head">
+    <h2>Importer un fichier</h2>
+    <button class="close-x" id="closeImportX" title="Fermer" aria-label="Fermer">×</button>
+  </div>
+  <div class="modal-body">
+    <p class="hint" id="importSummary"></p>
+    <div class="export-grid">
+      <button class="export-choice" id="impReplace">
+        <strong>Remplacer la session en cours</strong>
+        <span id="impReplaceHint">La session actuelle est remplacée. Elle reste récupérable par « Annuler » (Ctrl+Z) et dans les sessions enregistrées.</span>
+      </button>
+      <button class="export-choice" id="impMerge">
+        <strong>Ajouter les feuilles au classeur</strong>
+        <span id="impMergeHint">Les feuilles du fichier importé sont ajoutées à côté des feuilles actuelles, sans rien écraser.</span>
+      </button>
+    </div>
+  </div>
+  <div class="modal-foot">
+    <span class="hint" id="importWarn"></span>
+    <span class="spacer"></span>
+    <button class="btn-quiet" id="cancelImportBtn">Annuler l'import</button>
+  </div>
+</dialog>
+
+<!-- ============================================== modale des colonnes -->
+<dialog class="modal" id="columnDialog">
+  <div class="modal-head">
+    <h2 id="columnDialogTitle">Ajouter une colonne</h2>
+    <button class="close-x" id="closeColumnX" title="Fermer" aria-label="Fermer">×</button>
+  </div>
+  <div class="modal-body">
+    <div class="section-title">Colonne simple</div>
+    <div class="fields">
+      <div class="field">
+        <label for="newColName">Nom</label>
+        <input type="text" id="newColName" placeholder="Nouvelle colonne">
+      </div>
+      <div class="field">
+        <label for="newColType">Type</label>
+        <select id="newColType">
+          <option value="text">texte (conserve les zéros initiaux)</option>
+          <option value="number">nombre</option>
+          <option value="date">date</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="newColPos">Insérer après</label>
+        <select id="newColPos"></select>
+      </div>
+    </div>
+
+    <div class="section-title">Colonnes calculées proposées</div>
+    <div class="sugg-list" id="colSuggestions"></div>
+    <p class="hint" id="colSuggEmpty" style="display:none">
+      Aucun calcul à proposer pour l'instant : il faut au moins deux colonnes de date,
+      deux colonnes d'années, deux colonnes numériques ou deux colonnes de texte renseignées.
+    </p>
+  </div>
+  <div class="modal-foot">
+    <button class="btn-primary" id="createColumnBtn">Créer la colonne</button>
+    <span class="hint">Une colonne calculée se met à jour automatiquement quand ses colonnes sources changent.</span>
+    <span class="spacer"></span>
+    <button class="btn-quiet" id="closeColumnBtn">Fermer</button>
+  </div>
+</dialog>
+
+<!-- ============================================== modale des feuilles -->
+<dialog class="modal" id="sheetDialog">
+  <div class="modal-head">
+    <h2>Ajouter une feuille</h2>
+    <button class="close-x" id="closeSheetX" title="Fermer" aria-label="Fermer">×</button>
+  </div>
+  <div class="modal-body">
+    <div class="section-title">Feuille vide</div>
+    <div class="fields">
+      <div class="field">
+        <label for="newSheetName">Nom</label>
+        <input type="text" id="newSheetName" placeholder="Feuille">
+      </div>
+      <div class="field">
+        <label for="newSheetModel">Colonnes</label>
+        <select id="newSheetModel">
+          <option value="empty">une colonne vide</option>
+          <option value="copy">mêmes colonnes que la feuille affichée</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section-title">Feuilles proposées d'après les données</div>
+    <div class="sugg-list" id="sheetSuggestions"></div>
+    <p class="hint" id="sheetSuggEmpty" style="display:none">
+      Aucun regroupement à proposer : il faut une colonne dont au moins deux lignes partagent la même valeur.
+    </p>
+  </div>
+  <div class="modal-foot">
+    <button class="btn-primary" id="createSheetBtn">Créer la feuille</button>
+    <span class="spacer"></span>
+    <button class="btn-quiet" id="closeSheetBtn">Fermer</button>
+  </div>
+</dialog>
+
+<!-- ============================================== modale des sessions -->
+<dialog class="modal" id="sessionsDialog">
+  <div class="modal-head">
+    <h2>Sessions enregistrées dans ce navigateur</h2>
+    <button class="close-x" id="closeSessionsX" title="Fermer" aria-label="Fermer">×</button>
+  </div>
+  <div class="modal-body">
+    <p class="hint" id="sessionsIntro"></p>
+    <table class="rows-table">
+      <thead><tr><th>Document</th><th>Contenu</th><th>Enregistrée</th><th></th></tr></thead>
+      <tbody id="sessionsBody"></tbody>
+    </table>
+  </div>
+  <div class="modal-foot">
+    <span class="hint" id="storageUsage"></span>
+    <span class="spacer"></span>
+    <button class="btn-quiet" id="closeSessionsBtn">Fermer</button>
+  </div>
+</dialog>
+
+<!-- =============================================== modale du journal -->
+<dialog class="modal" id="journalDialog">
+  <div class="modal-head">
+    <h2>Journal des modifications</h2>
+    <button class="close-x" id="closeJournalX" title="Fermer" aria-label="Fermer">×</button>
+  </div>
+  <div class="modal-body">
+    <ul class="journal-list" id="journalList"></ul>
+  </div>
+  <div class="modal-foot">
+    <button class="btn-quiet" id="exportJournal">Exporter le journal en CSV</button>
+    <button class="btn-danger" id="clearJournal">Vider le journal</button>
+    <span class="spacer"></span>
+    <button class="btn-quiet" id="closeJournalBtn">Fermer</button>
+  </div>
+</dialog>
+
+<!-- ================================================ modale d'export -->
+<dialog class="modal" id="exportDialog">
+  <div class="modal-head">
+    <h2>Exporter les données</h2>
+    <button class="close-x" id="closeExportX" title="Fermer" aria-label="Fermer">×</button>
+  </div>
+  <div class="modal-body">
+    <div class="export-grid">
+      <button class="export-choice" id="expXlsx">
+        <strong>Classeur Excel (.xlsx)</strong>
+        <span>Toutes les feuilles dans un seul fichier. Les dates restent des dates.</span>
+      </button>
+      <button class="export-choice" id="expOds">
+        <strong>Classeur OpenDocument (.ods)</strong>
+        <span>Même contenu, pour LibreOffice et OpenOffice.</span>
+      </button>
+      <button class="export-choice" id="expCsv">
+        <strong>Feuille affichée en CSV</strong>
+        <span id="expCsvHint">Un fichier texte contenant la feuille en cours.</span>
+      </button>
+      <button class="export-choice" id="expCsvAll">
+        <strong>Toutes les feuilles en CSV</strong>
+        <span>Un fichier par feuille, téléchargés l'un après l'autre.</span>
+      </button>
+    </div>
+    <div class="bar" style="margin-top:14px">
+      <label class="inline">Séparateur du CSV
+        <select id="csvSep" title="Excel en français attend le point-virgule">
+          <option value=";" selected>point-virgule</option>
+          <option value=",">virgule</option>
+          <option value="&#9;">tabulation</option>
+        </select>
+      </label>
+      <label class="inline" title="Une cellule commençant par = + - @ est exécutée comme formule à l'ouverture dans Excel">
+        <input type="checkbox" id="csvNeutralize" checked> Neutraliser les formules (recommandé)
+      </label>
+    </div>
+    <p class="hint" id="exportNameHint" style="margin-top:10px"></p>
+  </div>
+  <div class="modal-foot">
+    <span class="hint">Les mises en forme et formules du fichier d'origine ne sont pas conservées.</span>
+    <span class="spacer"></span>
+    <button class="btn-quiet" id="closeExportBtn">Fermer</button>
+  </div>
+</dialog>
+
+<div id="colMenu" role="menu"></div>
+<script>
+"use strict";
+
+/* =====================================================================
+   1. État et constantes
+   ===================================================================== */
+
+/* Les sauvegardes sont indexées par document : deux fichiers différents
+   n'écrasent plus la même clé, et deux onglets sur le même document se
+   voient grâce à un verrou daté. */
+const LS_SESSION = 'tableur.session.v4::';   // charge utile
+const LS_META    = 'tableur.meta.v4::';      // fiche légère, pour la liste
+const LS_LOCK    = 'tableur.lock.v4::';      // verrou d'onglet
+const LEGACY_KEY = 'tableur.session.v3';     // ancienne clé unique, migrée au démarrage
+
+const TAB_ID    = 'onglet-' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+const LOCK_TTL  = 15000;   // au-delà, le verrou est considéré abandonné
+const LOCK_BEAT = 5000;
+
+let sheets = {};          // { nomFeuille: { columns:[{key,type,formula?}], rows:[{}] } }
+let currentSheet = '';
+let fileLabel = '';       // libellé affiché du document
+let docKey = 'nouveau-document';   // identité de la sauvegarde
+let docMeta = null;       // { name, size, lastModified } du fichier importé
+let sortCol = '', sortAsc = true;
+let page = 1;
+let journal = [];         // { ts, sheet, kind, text }
+let undoStack = [];
+let fileHandle = null;
+let linkedInfo = null;    // { name, size, lastModified, path }
+let linkedType = 'xlsx';  // format d'écriture du fichier lié : xlsx, ods ou csv
+let lsTimer = null, fsTimer = null;
+let dirtyLocal = false, dirtyFile = false;   // écritures encore en attente
+let storageBlocked = false;                  // quota atteint : plus rien n'est persisté
+let quotaAlerted = false;
+let autosaveOff = false;  // un autre onglet tient le verrou : on n'écrase pas son travail
+let heldLocks = [];
+let pendingImport = null; // fichier analysé, en attente du choix de l'utilisateur
+
+const DATE_KEYWORDS = ['date','jour','début','debut','fin','échéance','echeance','création','creation',
+  'maj','naissance','sortie','entrée','entree','anniversaire','expiration','péremption','peremption'];
+
+const START_WORDS = ['début','debut','start','depart','départ','entrée','entree','création','creation','commande',
+  'achat','naissance','ouverture','arrivée','arrivee','émission','emission','souscription','embauche','depuis'];
+const END_WORDS = ['fin','end','sortie','échéance','echeance','livraison','clôture','cloture','retour','expiration',
+  'péremption','peremption','paiement','règlement','reglement','fermeture','résiliation','resiliation','jusqu'];
+
+const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+const FR_RE  = /^\d{1,2}\/\d{1,2}\/\d{4}$/;
+const NUM_RE = /^-?\d+(?:[.,]\d+)?$/;
+const NUM_SPACED_RE = /^-?\d{1,3}(?:[ \u00A0\u202F]\d{3})+(?:[.,]\d+)?$/;
+
+/* =====================================================================
+   2. Utilitaires
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const own = (o, k) => Object.prototype.hasOwnProperty.call(Object(o), k);
+
+/* Une colonne peut s'appeler « constructor » ou « toString » : on ne lit
+   jamais une valeur héritée du prototype. */
+function cellValue(row, key) { return own(row, key) ? row[key] : ''; }
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined && text !== null) n.textContent = text;
+  return n;
+}
+function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function p2(n) { return String(n).padStart(2, '0'); }
+
+function isoFromDate(d) {                       // sans décalage de fuseau
+  return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
+}
+function isoToFr(iso) {
+  const p = String(iso).split('-');
+  return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : iso;
+}
+function dateFromIso(iso) {
+  const p = String(iso).split('-').map(Number);
+  return new Date(p[0], p[1] - 1, p[2]);
+}
+function toDate(v) {
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+  const s = String(v == null ? '' : v).trim();
+  if (ISO_RE.test(s)) { const d = dateFromIso(s); return isNaN(d.getTime()) ? null : d; }
+  if (FR_RE.test(s)) {
+    const p = s.split('/').map(Number);
+    const d = new Date(p[2], p[1] - 1, p[0]);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+function nowLabel() {
+  const d = new Date();
+  return p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+}
+function stamp() {
+  const d = new Date();
+  return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + '_' + p2(d.getHours()) + p2(d.getMinutes());
+}
+function shortValue(v) {
+  const s = (v === '' || v === null || v === undefined) ? '(vide)' : String(v);
+  return s.length > 28 ? s.slice(0, 27) + '…' : s;
+}
+function humanSize(n) {
+  if (!Number.isFinite(n)) return '';
+  if (n < 1024) return n + ' o';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1).replace('.', ',') + ' Ko';
+  return (n / 1024 / 1024).toFixed(1).replace('.', ',') + ' Mo';
+}
+function frDateTime(iso) {
+  try { return new Date(iso).toLocaleString('fr-FR'); } catch (e) { return String(iso); }
+}
+function sheet() { return sheets[currentSheet] || { columns: [], rows: [] }; }
+function hasData() { return Object.keys(sheets).length > 0; }
+function uniqueName(base, taken) {
+  let name = base, i = 2;
+  while (taken.includes(name)) { name = base + ' ' + i; i++; }
+  return name;
+}
+function numberOf(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return null;
+  if (!NUM_RE.test(s) && !NUM_SPACED_RE.test(s)) return null;
+  const n = Number(s.replace(/[\s\u00A0\u202F]/g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+function digitsOf(s) { return String(s).replace(/[^\d]/g, ''); }
+
+/* Un nombre à plus de quinze chiffres significatifs perd de la précision :
+   ces valeurs-là ne doivent jamais devenir des nombres. */
+function tooManyDigits(v) { return digitsOf(v).replace(/^0+/, '').length > 15; }
+function hasLeadingZero(v) { return /^0\d/.test(String(v).trim()); }
+
+/* --------------------------------------------------- librairie SheetJS */
+function xlsxReady() {
+  return typeof XLSX !== 'undefined' && XLSX && XLSX.utils &&
+    typeof XLSX.utils.book_new === 'function' &&
+    typeof XLSX.utils.json_to_sheet === 'function' &&
+    typeof XLSX.write === 'function';
+}
+function libMessage() {
+  return window.__xlsxLoadError
+    ? "Le fichier xlsx.full.min.js est introuvable à côté de cette page."
+    : "Le fichier xlsx.full.min.js est présent mais n'a pas pu être chargé (fichier incomplet ou corrompu).";
+}
+function ensureXlsx(what) {
+  if (xlsxReady()) return true;
+  showLibBanner();
+  alert(libMessage() + "\n\n" + (what || 'Cette action') +
+    " nécessite cette librairie. Placez xlsx.full.min.js (SheetJS 0.20.3) dans le même dossier que cette page, puis rechargez.\n\n" +
+    "L'import de fichiers CSV et la sauvegarde dans le navigateur restent disponibles sans elle.");
+  return false;
+}
+function showLibBanner() {
+  if (xlsxReady()) { $('libBanner').style.display = 'none'; return; }
+  $('libText').textContent = libMessage() +
+    " Les formats .xlsx, .xls et .ods sont indisponibles (import comme export) ; le CSV reste utilisable.";
+  $('libBanner').style.display = 'flex';
+}
+
+/* =====================================================================
+   3. Sauvegarde locale : une entrée par document
+   ===================================================================== */
+function docKeyFor(meta) {
+  if (!meta || !meta.name) return 'nouveau-document';
+  return encodeURIComponent(meta.name) + '|' + (meta.size || 0) + '|' + (meta.lastModified || 0);
+}
+function describeDoc() {
+  if (!docMeta) return fileLabel || 'Document sans fichier';
+  const bits = [docMeta.name];
+  if (docMeta.size) bits.push(humanSize(docMeta.size));
+  if (docMeta.lastModified) bits.push('modifié le ' + new Date(docMeta.lastModified).toLocaleString('fr-FR'));
+  return bits.join(' · ');
+}
+function refreshDocLabel() {
+  const node = $('fileName');
+  node.textContent = fileLabel || 'Aucun fichier chargé';
+  node.title = hasData() ? describeDoc() : '';
+}
+
+function lsAvailable() {
+  try { localStorage.setItem('tableur.probe', '1'); localStorage.removeItem('tableur.probe'); return true; }
+  catch (e) { return false; }
+}
+
+function scheduleSave() {
+  dirtyLocal = true;
+  // un autre onglet a pu prendre la main entre-temps : on ne réécrit pas par-dessus
+  if (!autosaveOff && hasData()) {
+    const other = foreignLock(docLockName());
+    if (other) {
+      autosaveOff = true;
+      showTabBanner('Un autre onglet travaille sur le même document (' + (other.label || 'sans nom') +
+        '). La sauvegarde automatique est désactivée ici pour ne pas écraser son travail ; « Prendre la main » la bascule de ce côté.');
+    } else takeLock(docLockName(), fileLabel || 'document');
+  }
+  setStatus('pending');
+  clearTimeout(lsTimer);
+  lsTimer = setTimeout(saveLocal, 500);
+  if (fileHandle) {
+    dirtyFile = true;
+    clearTimeout(fsTimer);
+    fsTimer = setTimeout(saveToFile, 1200);
+  }
+}
+
+function sessionPayload(withJournal) {
+  return JSON.stringify({
+    savedAt: new Date().toISOString(), docKey: docKey, fileLabel: fileLabel, docMeta: docMeta,
+    currentSheet: currentSheet, sheets: sheets, journal: withJournal ? journal.slice(0, 200) : []
+  });
+}
+function sessionMeta(bytes) {
+  const names = Object.keys(sheets);
+  return JSON.stringify({
+    docKey: docKey, savedAt: new Date().toISOString(), fileLabel: fileLabel, docMeta: docMeta,
+    sheetCount: names.length, rowCount: names.reduce((n, s) => n + sheets[s].rows.length, 0), bytes: bytes
+  });
+}
+
+function saveLocal() {
+  if (!hasData()) return;
+  if (autosaveOff) { setStatus('off', 'Sauvegarde automatique suspendue (autre onglet)'); return; }
+  const key = LS_SESSION + docKey, metaKey = LS_META + docKey;
+  let payload = sessionPayload(true);
+  try {
+    localStorage.setItem(key, payload);
+    localStorage.setItem(metaKey, sessionMeta(payload.length));
+  } catch (e) {
+    // deuxième essai sans le journal, qui est la partie la moins critique
+    try {
+      payload = sessionPayload(false);
+      localStorage.setItem(key, payload);
+      localStorage.setItem(metaKey, sessionMeta(payload.length));
+      log('struct', 'Sauvegarde locale conservée sans le journal, faute de place');
+    } catch (e2) { quotaFailure(e2, payload.length); return; }
+  }
+  dirtyLocal = false;
+  storageBlocked = false;
+  $('storageBanner').style.display = 'none';
+  setStatus('saved');
+}
+
+/* Le quota (environ 5 Mo) était signalé dans un coin du bandeau : on le
+   dit franchement, et l'avertissement reste affiché tant que rien n'est
+   enregistré. */
+function quotaFailure(err, bytes) {
+  storageBlocked = true;
+  dirtyLocal = true;
+  $('lsDot').className = 'dot fail';
+  $('lsText').textContent = 'NON ENREGISTRÉ — mémoire du navigateur saturée';
+  $('storageText').textContent =
+    'Sauvegarde dans le navigateur impossible : la limite de stockage (environ 5 Mo) est atteinte. ' +
+    'Vos ' + humanSize(bytes || 0) + ' de données ne sont plus conservés qu\'en mémoire vive : ' +
+    'fermer cet onglet les perdrait. Exportez le fichier, ou supprimez d\'anciennes sessions.';
+  $('storageBanner').style.display = 'flex';
+  if (!quotaAlerted) {
+    quotaAlerted = true;
+    setTimeout(() => alert('La sauvegarde automatique dans le navigateur ne fonctionne plus : la limite de stockage est atteinte.\n\n' +
+      'Tant que ce message reste affiché, vos modifications ne survivent pas à la fermeture de l\'onglet. ' +
+      'Exportez vos données, ou libérez de la place depuis « Sessions enregistrées ».'), 30);
+  }
+}
+
+function setStatus(state, text) {
+  const dot = $('lsDot'), txt = $('lsText');
+  if (storageBlocked && state !== 'saved') return;
+  if (state === 'saved') { dot.className = 'dot saved'; txt.textContent = text || ('Enregistré dans le navigateur à ' + nowLabel()); }
+  else if (state === 'pending') { dot.className = 'dot pending'; txt.textContent = text || 'Enregistrement…'; }
+  else { dot.className = 'dot off'; txt.textContent = text || 'Sauvegarde automatique en attente de données'; }
+}
+
+function listSessions() {
+  const out = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || k.indexOf(LS_META) !== 0) continue;
+      try {
+        const m = JSON.parse(localStorage.getItem(k));
+        if (m && m.docKey) out.push(m);
+      } catch (e) { /* fiche illisible, ignorée */ }
+    }
+  } catch (e) { /* stockage indisponible */ }
+  return out.sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)));
+}
+function readSession(key) {
+  try { return JSON.parse(localStorage.getItem(LS_SESSION + key) || 'null'); } catch (e) { return null; }
+}
+function dropSession(key) {
+  try { localStorage.removeItem(LS_SESSION + key); localStorage.removeItem(LS_META + key); } catch (e) { /* rien */ }
+}
+
+/* Reprise de l'ancienne clé unique v3, pour ne pas perdre une session en cours. */
+function migrateLegacy() {
+  let old = null;
+  try { old = JSON.parse(localStorage.getItem(LEGACY_KEY) || 'null'); } catch (e) { return; }
+  if (!old || !old.sheets || !Object.keys(old.sheets).length) return;
+  const meta = old.fileLabel ? { name: old.fileLabel, size: 0, lastModified: 0 } : null;
+  const key = docKeyFor(meta);
+  try {
+    localStorage.setItem(LS_SESSION + key, JSON.stringify({
+      savedAt: old.savedAt || new Date().toISOString(), docKey: key, fileLabel: old.fileLabel || '',
+      docMeta: meta, currentSheet: old.currentSheet, sheets: old.sheets, journal: old.journal || []
+    }));
+    const names = Object.keys(old.sheets);
+    localStorage.setItem(LS_META + key, JSON.stringify({
+      docKey: key, savedAt: old.savedAt || new Date().toISOString(), fileLabel: old.fileLabel || '',
+      docMeta: meta, sheetCount: names.length,
+      rowCount: names.reduce((n, s) => n + (old.sheets[s].rows || []).length, 0), bytes: 0
+    }));
+    localStorage.removeItem(LEGACY_KEY);
+  } catch (e) { /* place insuffisante : l'ancienne clé est laissée en place */ }
+}
+
+/* =====================================================================
+   4. Verrous : détecter un autre onglet sur le même document
+   ===================================================================== */
+const bus = ('BroadcastChannel' in window) ? new BroadcastChannel('tableur.v4') : null;
+
+function readLock(name) {
+  try { return JSON.parse(localStorage.getItem(LS_LOCK + name) || 'null'); } catch (e) { return null; }
+}
+function lockAlive(lock) { return !!lock && (Date.now() - (lock.at || 0)) < LOCK_TTL; }
+function foreignLock(name) {
+  const l = readLock(name);
+  return (lockAlive(l) && l.tab !== TAB_ID) ? l : null;
+}
+function takeLock(name, label) {
+  try { localStorage.setItem(LS_LOCK + name, JSON.stringify({ tab: TAB_ID, at: Date.now(), label: label || '' })); } catch (e) { /* rien */ }
+  if (heldLocks.indexOf(name) === -1) heldLocks.push(name);
+}
+function releaseLocks() {
+  heldLocks.forEach(name => {
+    const l = readLock(name);
+    if (l && l.tab === TAB_ID) { try { localStorage.removeItem(LS_LOCK + name); } catch (e) { /* rien */ } }
+  });
+  heldLocks = [];
+}
+setInterval(() => {
+  heldLocks.forEach(name => {
+    const l = readLock(name);
+    if (!l || l.tab === TAB_ID || !lockAlive(l)) takeLock(name, l && l.label);
+  });
+}, LOCK_BEAT);
+
+function docLockName() { return 'doc::' + docKey; }
+function fileLockName(name) { return 'fichier::' + String(name).toLowerCase(); }
+
+/* Appelé à chaque changement de document (import, restauration). */
+function claimDocument(label, silent) {
+  const name = docLockName();
+  const other = silent ? null : foreignLock(name);
+  if (other) {
+    autosaveOff = true;
+    showTabBanner('Un autre onglet a déjà ce document ouvert (' + (other.label || 'document en cours') + ', signe de vie il y a ' +
+      Math.round((Date.now() - other.at) / 1000) + ' s). La sauvegarde automatique est désactivée ici : sans cela, le dernier onglet qui modifie écrase l\'autre sans le savoir.');
+  } else {
+    autosaveOff = false;
+    $('tabBanner').style.display = 'none';
+    takeLock(name, label || fileLabel || 'document');
+  }
+  if (bus && !silent) bus.postMessage({ type: 'open', tab: TAB_ID, doc: docKey, label: fileLabel });
+}
+function showTabBanner(text) {
+  $('tabText').textContent = text;
+  $('tabBanner').style.display = 'flex';
+}
+if (bus) {
+  bus.onmessage = ev => {
+    const m = ev.data || {};
+    if (m.tab === TAB_ID) return;
+    if (m.type === 'open' && m.doc === docKey && hasData() && !autosaveOff) {
+      showTabBanner('Un autre onglet vient d\'ouvrir le même document (' + (m.label || 'sans nom') +
+        '). Les deux sauvegardes visent la même entrée : ne modifiez pas des deux côtés en même temps.');
+    }
+    if (m.type === 'file' && fileHandle && linkedInfo && m.file === fileLockName(linkedInfo.name)) {
+      showTabBanner('Un autre onglet vient de lier le même fichier « ' + linkedInfo.name +
+        ' ». Les deux onglets réécriraient le fichier entier à chaque modification, chacun effaçant le travail de l\'autre.');
+    }
+  };
+}
+$('tabTakeBtn').addEventListener('click', () => {
+  autosaveOff = false;
+  takeLock(docLockName(), fileLabel || 'document');
+  $('tabBanner').style.display = 'none';
+  scheduleSave();
+});
+$('tabIgnoreBtn').addEventListener('click', () => {
+  autosaveOff = true;
+  $('tabBanner').style.display = 'none';
+  setStatus('off', 'Sauvegarde automatique désactivée dans cet onglet');
+});
+
+/* =====================================================================
+   5. Fichier lié sur le disque
+   ===================================================================== */
+function typeFromName(name) {
+  const ext = String(name).split('.').pop().toLowerCase();
+  if (ext === 'ods') return 'ods';
+  if (ext === 'csv' || ext === 'tsv' || ext === 'txt') return 'csv';
+  return 'xlsx';
+}
+
+function describeLinked(extra) {
+  if (!fileHandle || !linkedInfo) return 'Aucun fichier lié';
+  const bits = [];
+  bits.push('Fichier « ' + (linkedInfo.path || linkedInfo.name) + ' »');
+  if (linkedInfo.size) bits.push(humanSize(linkedInfo.size));
+  if (!linkedInfo.path) bits.push('dossier non communiqué par le navigateur');
+  if (extra) bits.push(extra);
+  if (linkedType === 'csv') bits.push('feuille « ' + currentSheet + ' » seulement');
+  return bits.join(' · ');
+}
+function refreshLinkedStatus(extra, state) {
+  $('fsDot').className = 'dot ' + (state || 'off');
+  $('fsText').textContent = describeLinked(extra);
+  $('fsText').title = fileHandle ? describeLinked() : '';
+}
+
+async function readHandleInfo() {
+  if (!fileHandle) return;
+  try {
+    const f = await fileHandle.getFile();
+    linkedInfo = Object.assign({}, linkedInfo, { name: fileHandle.name, size: f.size, lastModified: f.lastModified });
+  } catch (e) {
+    linkedInfo = Object.assign({ name: fileHandle.name }, linkedInfo || {});
+  }
+}
+
+async function saveToFile() {
+  if (!fileHandle) return;
+  if (linkedType !== 'csv' && !xlsxReady()) {
+    dirtyFile = true;
+    refreshLinkedStatus('écriture impossible : ' + libMessage(), 'fail');
+    return;
+  }
+  try {
+    let blob;
+    if (linkedType === 'csv') {
+      // Un CSV ne contient qu'une feuille : seule la feuille affichée est écrite.
+      blob = new Blob([sheetToCsv(currentSheet)], { type: 'text/csv;charset=utf-8;' });
+    } else {
+      blob = new Blob([XLSX.write(buildWorkbook(), { bookType: linkedType, type: 'array' })]);
+    }
+    const w = await fileHandle.createWritable();
+    await w.write(blob);
+    await w.close();
+    dirtyFile = false;
+    await readHandleInfo();
+    refreshLinkedStatus('à jour à ' + nowLabel(), 'saved');
+  } catch (e) {
+    dirtyFile = true;
+    refreshLinkedStatus('écriture impossible : ' + (e && e.message ? e.message : 'erreur inconnue'), 'fail');
+  }
+}
+
+async function linkFile() {
+  if (!('showSaveFilePicker' in window)) {
+    alert("La sauvegarde directe sur le disque n'est disponible que sur Chrome et Edge. La sauvegarde dans le navigateur reste active.");
+    return;
+  }
+  if (!hasData()) { alert('Chargez ou créez des données avant de lier un fichier.'); return; }
+  if (!confirm("Le fichier lié sera réécrit à chaque modification, avec les valeurs affichées ici : mises en forme, formules et largeurs de colonnes du fichier d'origine seront perdues.\n\nGardez une copie de sauvegarde avant de continuer.")) return;
+
+  const base = fileLabel ? fileLabel.replace(/\.[^.]+$/, '') : 'donnees';
+  const sameExt = fileLabel ? typeFromName(fileLabel) : 'xlsx';
+  try {
+    fileHandle = await window.showSaveFilePicker({
+      suggestedName: base + '.' + sameExt,
+      types: [
+        { key: 'ods', description: 'Classeur OpenDocument (.ods)', accept: { 'application/vnd.oasis.opendocument.spreadsheet': ['.ods'] } },
+        { key: 'xlsx', description: 'Classeur Excel (.xlsx)', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } },
+        { key: 'csv', description: 'Fichier CSV, une seule feuille (.csv)', accept: { 'text/csv': ['.csv'] } }
+      ].sort((a, b) => (a.key === sameExt ? 0 : 1) - (b.key === sameExt ? 0 : 1))
+       .map(t => ({ description: t.description, accept: t.accept }))
+    });
+  } catch (e) { return; }   /* l'utilisateur a annulé */
+
+  linkedType = typeFromName(fileHandle.name);
+  linkedInfo = { name: fileHandle.name, path: '' };
+  await readHandleInfo();
+
+  // Deux onglets liés au même fichier se réécrivaient mutuellement sans un mot.
+  const lock = fileLockName(fileHandle.name);
+  const other = foreignLock(lock);
+  if (other && !confirm('Un autre onglet écrit déjà dans un fichier nommé « ' + fileHandle.name + ' ».\n\n' +
+      'Chaque modification réécrit le fichier entier : les deux onglets effaceraient le travail l\'un de l\'autre.\n\n' +
+      'OK = lier quand même. Annuler = ne pas lier.')) {
+    fileHandle = null; linkedInfo = null; refreshLinkedStatus(); return;
+  }
+  takeLock(lock, fileHandle.name);
+  if (bus) bus.postMessage({ type: 'file', tab: TAB_ID, file: lock });
+
+  $('unlinkFileBtn').style.display = 'inline-block';
+  $('locateFolderBtn').style.display = ('showDirectoryPicker' in window) ? 'inline-block' : 'none';
+  await saveToFile();
+  log('struct', 'Fichier lié : ' + fileHandle.name + ' (' + linkedType + ')');
+}
+
+/* Le navigateur ne donne pas le chemin d'un fichier choisi. Si l'utilisateur
+   désigne le dossier, on peut en revanche résoudre le chemin relatif et
+   afficher enfin sur quel « clients.xlsx » on travaille. */
+async function locateFolder() {
+  if (!fileHandle || !('showDirectoryPicker' in window)) return;
+  let dir;
+  try { dir = await window.showDirectoryPicker({ mode: 'read' }); } catch (e) { return; }
+  try {
+    const rel = await dir.resolve(fileHandle);
+    if (!rel) {
+      alert('Le fichier lié ne se trouve pas dans « ' + dir.name +' » (ni dans ses sous-dossiers).\n\n' +
+        'Ce n\'est donc pas le « ' + fileHandle.name + ' » de ce dossier que vous modifiez.');
+      return;
+    }
+    linkedInfo.path = dir.name + '/' + rel.join('/');
+    refreshLinkedStatus('dossier confirmé', fileHandle ? 'saved' : 'off');
+    log('struct', 'Chemin du fichier lié : ' + linkedInfo.path);
+  } catch (e) {
+    alert('Impossible de résoudre le chemin : ' + (e && e.message ? e.message : 'erreur inconnue'));
+  }
+}
+
+function unlinkFile() {
+  if (dirtyFile && !confirm('Une écriture est encore en attente sur « ' + (linkedInfo ? linkedInfo.name : 'le fichier') + ' ». Délier maintenant la perdrait.\n\nContinuer ?')) return;
+  if (linkedInfo) {
+    const name = fileLockName(linkedInfo.name);
+    const l = readLock(name);
+    if (l && l.tab === TAB_ID) { try { localStorage.removeItem(LS_LOCK + name); } catch (e) { /* rien */ } }
+    heldLocks = heldLocks.filter(n => n !== name);
+  }
+  fileHandle = null; linkedInfo = null; linkedType = 'xlsx'; dirtyFile = false;
+  clearTimeout(fsTimer);
+  $('unlinkFileBtn').style.display = 'none';
+  $('locateFolderBtn').style.display = 'none';
+  refreshLinkedStatus();
+}
+
+/* =====================================================================
+   6. Lecture des fichiers : encodage, CSV, typage
+   ===================================================================== */
+
+/* Un CSV Latin-1 arrivait avec les accents cassés, sans rien signaler. */
+function decodeText(buffer) {
+  const bytes = new Uint8Array(buffer);
+  if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF)
+    return { text: new TextDecoder('utf-8').decode(bytes.subarray(3)), encoding: 'UTF-8 (BOM)' };
+  if (bytes[0] === 0xFF && bytes[1] === 0xFE)
+    return { text: new TextDecoder('utf-16le').decode(bytes.subarray(2)), encoding: 'UTF-16 LE' };
+  if (bytes[0] === 0xFE && bytes[1] === 0xFF)
+    return { text: new TextDecoder('utf-16be').decode(bytes.subarray(2)), encoding: 'UTF-16 BE' };
+  try {
+    return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes), encoding: 'UTF-8' };
+  } catch (e) {
+    return { text: new TextDecoder('windows-1252').decode(bytes), encoding: 'Windows-1252 (Latin-1)', converted: true };
+  }
+}
+
+function sniffSeparator(sample) {
+  const line = sample.split(/\r?\n/).find(l => l.trim().length) || '';
+  let best = ';', bestCount = -1;
+  [';', ',', '\t', '|'].forEach(sep => {
+    let count = 0, inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') inQuotes = !inQuotes;
+      else if (c === sep && !inQuotes) count++;
+    }
+    if (count > bestCount) { bestCount = count; best = sep; }
+  });
+  return best;
+}
+
+/* Analyse maison : toutes les valeurs restent du texte jusqu'au typage,
+   ce qui préserve « 01234 » et les identifiants de plus de quinze chiffres. */
+function parseDelimited(text, sep) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+      continue;
+    }
+    if (c === '"') { inQuotes = true; continue; }
+    if (c === sep) { row.push(field); field = ''; continue; }
+    if (c === '\r') continue;
+    if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; continue; }
+    field += c;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.length > 1 || String(r[0] || '').trim() !== '');
+}
+
+/* Les en-têtes sont assainis avant toute écriture : assigner row['__proto__']
+   ne crée aucune propriété, la colonne serait perdue en silence. */
+function headersFromRow(line) {
+  const headers = [], renamed = [];
+  line.forEach((h, i) => {
+    let base = String(h === null || h === undefined ? '' : h).trim() || ('Colonne ' + (i + 1));
+    if (RESERVED_KEYS.indexOf(base) !== -1) {
+      const safe = base.replace(/^_+|_+$/g, '') + '_';
+      renamed.push(base + ' → ' + safe);
+      base = safe;
+    }
+    headers.push(uniqueName(base, headers));
+  });
+  return { headers: headers, renamed: renamed };
+}
+
+/* Première ligne = en-têtes. keepRaw conserve les valeurs natives (dates,
+   nombres) ; sinon tout est ramené au texte, ce qui préserve « 01234 ». */
+function rowsFromMatrix(matrix, keepRaw) {
+  if (!matrix.length) return { rows: [], headers: [], renamed: [] };
+  const head = headersFromRow(matrix[0] || []);
+  const rows = matrix.slice(1).map(line => {
+    const out = {};
+    head.headers.forEach((key, i) => {
+      const v = line[i];
+      out[key] = (v === undefined || v === null) ? '' : (keepRaw ? v : String(v).trim());
+    });
+    return out;
+  });
+  return { rows: rows, headers: head.headers, renamed: head.renamed };
+}
+
+/* Une colonne « __proto__ » ne créait aucune propriété : ses valeurs
+   disparaissaient en silence. « constructor » et « prototype » sont tout
+   aussi piégeux à la lecture. */
+const RESERVED_KEYS = ['__proto__', 'constructor', 'prototype'];
+function sanitizeKeys(rows) {
+  const renamed = [];
+  const map = new Map();
+  rows.forEach(row => Object.keys(row).forEach(k => {
+    if (map.has(k)) return;
+    if (RESERVED_KEYS.indexOf(k) !== -1) {
+      const safe = k.replace(/^_+|_+$/g, '') + '_';
+      map.set(k, safe); renamed.push(k + ' → ' + safe);
+    } else map.set(k, k);
+  }));
+  if (!renamed.length) return { rows: rows, renamed: renamed };
+  const out = rows.map(row => {
+    const next = {};
+    Object.keys(row).forEach(k => { next[map.get(k) || k] = row[k]; });
+    return next;
+  });
+  return { rows: out, renamed: renamed };
+}
+
+/* -------------------------------------------------- détection des types */
+function detectColumns(rows, textRows) {
+  const stats = new Map();
+  rows.forEach((row, i) => {
+    const trow = (textRows && textRows[i]) || null;
+    Object.keys(row).forEach(key => {
+      if (!stats.has(key)) stats.set(key, { date: 0, num: 0, text: 0, serial: 0, longDec: 0, zero: 0, big: 0 });
+      const s = stats.get(key), v = row[key];
+      const t = trow ? trow[key] : undefined;
+      if (v === '' || v === null || v === undefined) return;
+      if (v instanceof Date) { s.date++; return; }
+      if (typeof v === 'number') {
+        s.num++;
+        if (v > 20000 && v < 80000) s.serial++;
+        const dec = String(v).split('.')[1];
+        if (dec && dec.length > 4) s.longDec++;
+        // le texte formaté du fichier révèle un zéro initial déjà perdu
+        if (t !== undefined && t !== null && hasLeadingZero(t)) s.zero++;
+        if (tooManyDigits(v) || (t != null && tooManyDigits(t))) s.big++;
+        return;
+      }
+      const str = String(v).trim();
+      if (ISO_RE.test(str) || FR_RE.test(str)) { s.date++; return; }
+      if (NUM_RE.test(str) || NUM_SPACED_RE.test(str)) {
+        if (hasLeadingZero(str)) { s.zero++; s.text++; }        // code postal, téléphone…
+        else if (tooManyDigits(str)) { s.big++; s.text++; }     // identifiant trop long pour un nombre
+        else s.num++;
+        return;
+      }
+      s.text++;
+    });
+  });
+
+  return Array.from(stats.entries()).map(([key, s]) => {
+    let type = 'text', guard = '';
+    if (s.zero > 0 || s.big > 0) {
+      guard = s.zero > 0 ? 'zéro initial' : 'plus de 15 chiffres';
+      type = 'text';
+    } else {
+      const kw = DATE_KEYWORDS.some(k => String(key).toLowerCase().includes(k));
+      if (s.text === 0 && s.date > 0 && s.num === 0) type = 'date';
+      else if (s.text === 0 && s.date === 0 && s.num > 0) {
+        // un nombre n'est traité comme date que si l'en-tête le dit, ou si toutes
+        // les valeurs sont des horodatages Excel à longues décimales
+        type = ((kw && s.serial === s.num) || s.longDec === s.num) ? 'date' : 'number';
+      }
+    }
+    const col = { key: String(key), type: type };
+    if (guard) col.guard = guard;
+    return col;
+  });
+}
+
+function normalizeRows(rows, columns) {
+  return rows.map(row => {
+    const out = {};
+    columns.forEach(col => {
+      let v = own(row, col.key) ? row[col.key] : '';
+      if (v === undefined || v === null) { out[col.key] = ''; return; }
+      if (col.type === 'date' && v !== '') {
+        if (v instanceof Date) { out[col.key] = isoFromDate(v); return; }
+        if (typeof v === 'number') {
+          try {
+            const p = XLSX.SSF.parse_date_code(v);
+            out[col.key] = p.y + '-' + p2(p.m) + '-' + p2(p.d);
+          } catch (e) { out[col.key] = v; }
+          return;
+        }
+        const str = String(v).trim();
+        if (FR_RE.test(str)) {
+          const p = str.split('/');
+          out[col.key] = p[2] + '-' + p2(p[1]) + '-' + p2(p[0]);
+          return;
+        }
+        out[col.key] = str;
+        return;
+      }
+      if (col.type === 'number' && typeof v === 'string') {
+        const n = numberOf(v);
+        out[col.key] = n === null ? v : n;
+        return;
+      }
+      if (v instanceof Date) { out[col.key] = isoFromDate(v); return; }
+      out[col.key] = v;
+    });
+    // on conserve les clés inconnues du schéma plutôt que de les perdre
+    Object.keys(row).forEach(k => { if (!own(out, k)) out[k] = row[k]; });
+    return out;
+  });
+}
+
+/* Les colonnes présentes dans les lignes mais absentes du schéma étaient
+   gardées en mémoire puis perdues à l'export : on les réintègre. */
+function reconcileColumns(sh) {
+  const known = new Set(sh.columns.map(c => c.key));
+  const extra = [];
+  sh.rows.forEach(r => Object.keys(r).forEach(k => {
+    if (!known.has(k)) { known.add(k); extra.push(k); }
+  }));
+  extra.forEach(k => sh.columns.push({ key: k, type: 'text' }));
+  return extra;
+}
+function reconcileAll() {
+  const found = [];
+  Object.keys(sheets).forEach(name => {
+    const sh = sheets[name];
+    sh.columns = sh.columns || [];
+    sh.rows = sh.rows || [];
+    reconcileColumns(sh).forEach(k => found.push(name + ' / ' + k));
+  });
+  return found;
+}
+
+function coerce(col, raw) {
+  if (raw === '' || raw === null || raw === undefined) return '';
+  if (col.type === 'number') {
+    const n = numberOf(raw);
+    return n === null ? raw : n;
+  }
+  return raw;
+}
+
+/* =====================================================================
+   7. Colonnes calculées
+   ===================================================================== */
+function fullYearsBetween(d1, d2) {
+  let y = d2.getFullYear() - d1.getFullYear();
+  const m = d2.getMonth() - d1.getMonth();
+  if (m < 0 || (m === 0 && d2.getDate() < d1.getDate())) y--;
+  return y;
+}
+function monthsBetween(d1, d2) {
+  let m = (d2.getFullYear() - d1.getFullYear()) * 12 + (d2.getMonth() - d1.getMonth());
+  if (d2.getDate() < d1.getDate()) m--;
+  return m;
+}
+function twoDates(row, a) {
+  const d1 = toDate(cellValue(row, a.a)), d2 = toDate(cellValue(row, a.b));
+  return (d1 && d2) ? [d1, d2] : null;
+}
+function twoNumbers(row, a) {
+  const x = numberOf(cellValue(row, a.a)), y = numberOf(cellValue(row, a.b));
+  return (x === null || y === null) ? null : [x, y];
+}
+function round2(n) { return Math.round(n * 100) / 100; }
+
+const FORMULAS = {
+  joursEntre: {
+    type: 'number',
+    label: a => 'Nombre de jours entre « ' + a.a + ' » et « ' + a.b + ' »',
+    compute: (row, a) => { const d = twoDates(row, a); return d ? Math.round((d[1] - d[0]) / 86400000) : ''; }
+  },
+  moisEntre: {
+    type: 'number',
+    label: a => 'Nombre de mois entiers entre « ' + a.a + ' » et « ' + a.b + ' »',
+    compute: (row, a) => { const d = twoDates(row, a); return d ? monthsBetween(d[0], d[1]) : ''; }
+  },
+  anneesEntre: {
+    type: 'number',
+    label: a => 'Nombre d\'années entières entre « ' + a.a + ' » et « ' + a.b + ' »',
+    compute: (row, a) => { const d = twoDates(row, a); return d ? fullYearsBetween(d[0], d[1]) : ''; }
+  },
+  joursDepuis: {
+    type: 'number',
+    label: a => 'Nombre de jours écoulés depuis « ' + a.a + ' »',
+    compute: (row, a) => {
+      const d = toDate(cellValue(row, a.a));
+      if (!d) return '';
+      const t = new Date(); t.setHours(0, 0, 0, 0);
+      return Math.round((t - d) / 86400000);
+    }
+  },
+  anneeDe: {
+    type: 'number',
+    label: a => 'Année de « ' + a.a + ' »',
+    compute: (row, a) => { const d = toDate(cellValue(row, a.a)); return d ? d.getFullYear() : ''; }
+  },
+  moisDe: {
+    type: 'text',
+    label: a => 'Mois de « ' + a.a + ' » (AAAA-MM)',
+    compute: (row, a) => { const d = toDate(cellValue(row, a.a)); return d ? d.getFullYear() + '-' + p2(d.getMonth() + 1) : ''; }
+  },
+  trimestreDe: {
+    type: 'text',
+    label: a => 'Trimestre de « ' + a.a + ' »',
+    compute: (row, a) => { const d = toDate(cellValue(row, a.a)); return d ? 'T' + (Math.floor(d.getMonth() / 3) + 1) + ' ' + d.getFullYear() : ''; }
+  },
+  ecartAnnees: {
+    type: 'number',
+    label: a => 'Écart en années entre « ' + a.a + ' » et « ' + a.b + ' »',
+    compute: (row, a) => { const n = twoNumbers(row, a); return n ? n[1] - n[0] : ''; }
+  },
+  difference: {
+    type: 'number',
+    label: a => '« ' + a.b + ' » moins « ' + a.a + ' »',
+    compute: (row, a) => { const n = twoNumbers(row, a); return n ? round2(n[1] - n[0]) : ''; }
+  },
+  somme: {
+    type: 'number',
+    label: a => 'Somme de « ' + a.a + ' » et « ' + a.b + ' »',
+    compute: (row, a) => { const n = twoNumbers(row, a); return n ? round2(n[0] + n[1]) : ''; }
+  },
+  produit: {
+    type: 'number',
+    label: a => '« ' + a.a + ' » multiplié par « ' + a.b + ' »',
+    compute: (row, a) => { const n = twoNumbers(row, a); return n ? round2(n[0] * n[1]) : ''; }
+  },
+  pourcentage: {
+    type: 'number',
+    label: a => '« ' + a.a + ' » en % de « ' + a.b + ' »',
+    compute: (row, a) => { const n = twoNumbers(row, a); return (n && n[1] !== 0) ? round2(n[0] / n[1] * 100) : ''; }
+  },
+  partDuTotal: {
+    type: 'number',
+    label: a => 'Part de « ' + a.a + ' » dans le total de la feuille (%)',
+    context: (sh, a) => {
+      let total = 0;
+      sh.rows.forEach(r => { const n = numberOf(cellValue(r, a.a)); if (n !== null) total += n; });
+      return { total: total };
+    },
+    compute: (row, a, ctx) => {
+      const n = numberOf(cellValue(row, a.a));
+      return (n === null || !ctx || !ctx.total) ? '' : round2(n / ctx.total * 100);
+    }
+  },
+  concat: {
+    type: 'text',
+    label: a => '« ' + a.a +' » et « ' + a.b + ' » réunis',
+    compute: (row, a) => {
+      const x = String(cellValue(row, a.a) ?? '').trim(), y = String(cellValue(row, a.b) ?? '').trim();
+      return (x && y) ? x + ' ' + y : (x || y);
+    }
+  },
+  domaineMail: {
+    type: 'text',
+    label: a => 'Domaine de « ' + a.a + ' »',
+    compute: (row, a) => {
+      const s = String(cellValue(row, a.a) ?? '');
+      const at = s.lastIndexOf('@');
+      return at > 0 ? s.slice(at + 1).trim().toLowerCase() : '';
+    }
+  },
+  longueur: {
+    type: 'number',
+    label: a => 'Nombre de caractères de « ' + a.a + ' »',
+    compute: (row, a) => { const s = String(cellValue(row, a.a) ?? ''); return s === '' ? '' : s.length; }
+  }
+};
+
+function computedColumn(col) { return !!(col && col.formula && FORMULAS[col.formula.op]); }
+
+function recomputeSheet(sh) {
+  (sh.columns || []).forEach(col => {
+    if (!computedColumn(col)) return;
+    const def = FORMULAS[col.formula.op], args = col.formula.args;
+    const ctx = def.context ? def.context(sh, args) : null;
+    sh.rows.forEach(row => { row[col.key] = def.compute(row, args, ctx); });
+  });
+}
+function recomputeAll() { Object.keys(sheets).forEach(n => recomputeSheet(sheets[n])); }
+
+/* Renommer ou supprimer une colonne source ne doit pas casser un calcul. */
+function retargetFormulas(sh, oldKey, newKey) {
+  sh.columns.forEach(col => {
+    if (!col.formula) return;
+    Object.keys(col.formula.args).forEach(k => {
+      if (col.formula.args[k] === oldKey) col.formula.args[k] = newKey;
+    });
+  });
+}
+function freezeFormulasUsing(sh, key) {
+  const frozen = [];
+  sh.columns.forEach(col => {
+    if (!col.formula) return;
+    if (Object.keys(col.formula.args).some(k => col.formula.args[k] === key)) {
+      delete col.formula; frozen.push(col.key);
+    }
+  });
+  return frozen;
+}
+
+/* =====================================================================
+   8. Import
+   ===================================================================== */
+function buildSheetFromRows(rawRows, textRows, renamed) {
+  const columns = detectColumns(rawRows, textRows);
+  const guarded = new Set(columns.filter(c => c.guard).map(c => c.key));
+  const merged = rawRows.map((row, i) => {
+    const out = {};
+    Object.keys(row).forEach(k => {
+      const t = (textRows && textRows[i]) ? textRows[i][k] : undefined;
+      // pour une colonne protégée, on reprend le texte du fichier : « 01234 »
+      // et non le 1234 que la lecture numérique avait laissé
+      out[k] = (guarded.has(k) && t !== undefined && t !== null && String(t) !== '') ? String(t) : row[k];
+    });
+    return out;
+  });
+  const sh = { columns: columns, rows: normalizeRows(merged, columns) };
+  reconcileColumns(sh);
+  return { sheet: sh, renamed: renamed || [], guarded: Array.from(guarded) };
+}
+
+async function analyseFile(file) {
+  const notes = [];
+  const buffer = await file.arrayBuffer();
+  const out = { label: file.name, meta: { name: file.name, size: file.size, lastModified: file.lastModified }, sheets: {}, notes: notes };
+
+  if (/\.(csv|tsv|txt)$/i.test(file.name)) {
+    const dec = decodeText(buffer);
+    if (dec.converted) notes.push('Fichier lu en ' + dec.encoding + ' : les accents ont été rétablis (ce fichier n\'est pas en UTF-8).');
+    else if (dec.encoding !== 'UTF-8' && dec.encoding !== 'UTF-8 (BOM)') notes.push('Fichier lu en ' + dec.encoding + '.');
+    const sep = sniffSeparator(dec.text.slice(0, 4000));
+    const matrix = parseDelimited(dec.text, sep);
+    if (!matrix.length) throw new Error('fichier vide');
+    const parsed = rowsFromMatrix(matrix, false);
+    const built = buildSheetFromRows(parsed.rows, parsed.rows, parsed.renamed);
+    const name = file.name.replace(/\.[^.]+$/, '').slice(0, 60) || 'Feuille';
+    out.sheets[name] = built.sheet;
+    notes.push('Séparateur détecté : ' + (sep === '\t' ? 'tabulation' : '« ' + sep + ' »') + '.');
+    collectNotes(notes, name, built);
+    return out;
+  }
+
+  if (!ensureXlsx('L\'import d\'un classeur .xlsx, .xls ou .ods')) throw new Error('librairie absente');
+  const wb = XLSX.read(new Uint8Array(buffer), { type: 'array', cellDates: true });
+  wb.SheetNames.forEach(name => {
+    const ws = wb.Sheets[name];
+    const raw = rowsFromMatrix(XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false }), true);
+    // seconde lecture au format affiché du fichier, pour repérer les zéros
+    // initiaux et les identifiants que la lecture numérique a déjà abîmés
+    let formatted = null;
+    try {
+      formatted = rowsFromMatrix(XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false, raw: false }), false);
+    } catch (e) { formatted = null; }
+    const built = buildSheetFromRows(raw.rows, formatted ? formatted.rows : null, raw.renamed);
+    out.sheets[name] = built.sheet;
+    collectNotes(notes, name, built);
+  });
+  if (!Object.keys(out.sheets).length) throw new Error('aucune feuille');
+  return out;
+}
+
+function collectNotes(notes, sheetName, built) {
+  if (built.guarded.length) {
+    notes.push('Feuille « ' + sheetName + ' » : ' + built.guarded.map(k => '« ' + k + ' »').join(', ') +
+      ' ' + (built.guarded.length > 1 ? 'ont été gardées' : 'a été gardée') +
+      ' en type texte (zéro initial ou identifiant trop long) pour ne pas abîmer les valeurs.');
+  }
+  if (built.renamed.length) {
+    notes.push('Feuille « ' + sheetName + ' » : colonne(s) renommée(s) ' + built.renamed.join(', ') +
+      ' — ces noms sont réservés par le navigateur et leurs valeurs auraient disparu.');
+  }
+}
+
+function countRows(map) { return Object.keys(map).reduce((n, k) => n + map[k].rows.length, 0); }
+
+/* L'import écrasait tout sans rien demander, vidait la pile d'annulation
+   puis écrasait la sauvegarde. Il passe désormais par un choix explicite,
+   et reste annulable par Ctrl+Z. */
+$('fileUpload').addEventListener('change', function (e) {
+  const file = e.target.files[0];
+  e.target.value = '';                       // permet de réimporter le même fichier
+  if (!file) return;
+  analyseFile(file).then(parsed => {
+    pendingImport = parsed;
+    if (!hasData()) { applyImport('replace'); return; }
+    const inRows = countRows(parsed.sheets), inSheets = Object.keys(parsed.sheets).length;
+    $('importSummary').textContent =
+      'Fichier « ' + file.name + ' » : ' + inSheets + ' feuille(s), ' + inRows + ' ligne(s). ' +
+      'Session en cours : ' + Object.keys(sheets).length + ' feuille(s), ' + countRows(sheets) + ' ligne(s)' +
+      (fileLabel ? ' (' + fileLabel + ')' : '') + '.';
+    $('importWarn').textContent = dirtyLocal || dirtyFile
+      ? 'Une sauvegarde est encore en attente sur la session en cours.' : '';
+    $('importDialog').showModal();
+  }).catch(err => {
+    if (err && err.message === 'librairie absente') return;
+    alert('Lecture impossible. Vérifiez le format du fichier.');
+    console.error(err);
+  });
+});
+
+function applyImport(mode) {
+  const parsed = pendingImport;
+  if (!parsed) return;
+  pendingImport = null;
+  const dlg = $('importDialog');
+  if (dlg.open) dlg.close();
+
+  if (mode === 'merge') {
+    snapshot();
+    const added = [];
+    Object.keys(parsed.sheets).forEach(name => {
+      const final = uniqueName(name, Object.keys(sheets));
+      sheets[final] = parsed.sheets[name];
+      added.push(final);
+    });
+    fileLabel = fileLabel ? (fileLabel + ' + ' + parsed.label) : parsed.label;
+    currentSheet = added[0] || currentSheet;
+    log('struct', 'Feuilles ajoutées depuis « ' + parsed.label + ' » : ' + added.join(', '));
+  } else {
+    snapshot();                              // la session précédente reste récupérable par Ctrl+Z
+    sheets = parsed.sheets;
+    fileLabel = parsed.label;
+    docMeta = parsed.meta;
+    docKey = docKeyFor(parsed.meta);
+    currentSheet = Object.keys(sheets)[0] || '';
+    journal = journal.slice(0, 200);
+    log('struct', 'Fichier importé : ' + parsed.label + ' (' + Object.keys(sheets).length + ' feuille(s))');
+    claimDocument(parsed.label);
+  }
+
+  recomputeAll();
+  sortCol = ''; page = 1; $('searchInput').value = '';
+  refreshDocLabel();
+  $('sheetBar').style.display = 'flex';
+  $('restoreBanner').style.display = 'none';
+  refreshSheetSelect(mode !== 'merge');
+  $('sheetSelect').value = currentSheet;
+  showNotes(parsed.notes);
+  buildForm(); render(); scheduleSave();
+}
+
+function showNotes(notes) {
+  if (!notes || !notes.length) { $('noteBanner').style.display = 'none'; return; }
+  $('noteText').textContent = notes.join(' ');
+  $('noteBanner').style.display = 'flex';
+  notes.forEach(n => log('struct', n));
+}
+
+/* =====================================================================
+   9. Export
+   ===================================================================== */
+
+/* Injection CSV : une cellule commençant par = + - @ est exécutée comme
+   formule à l'ouverture dans Excel. On préfixe, sauf pour un nombre. */
+function csvSafe(v) {
+  if (typeof v !== 'string') return v;
+  const s = v.trim();
+  if (!/^[=+\-@\t\r]/.test(s)) return v;
+  if (NUM_RE.test(s) || NUM_SPACED_RE.test(s)) return v;
+  return "'" + v;
+}
+function neutralizeOn() { return $('csvNeutralize').checked; }
+
+function rowsForExport(name, forCsv) {
+  const sh = sheets[name];
+  const guard = forCsv && neutralizeOn();
+  return sh.rows.map(row => {
+    const out = {};
+    sh.columns.forEach(col => {
+      const key = guard ? String(csvSafe(col.key)) : col.key;
+      const v = cellValue(row, col.key);
+      if (col.type === 'date' && typeof v === 'string' && ISO_RE.test(v)) out[key] = dateFromIso(v);
+      else out[key] = guard ? csvSafe(v) : v;
+    });
+    return out;
+  });
+}
+function headersForExport(name, forCsv) {
+  const guard = forCsv && neutralizeOn();
+  return sheets[name].columns.map(c => guard ? String(csvSafe(c.key)) : c.key);
+}
+
+/* Excel tronque les noms de feuille à 31 caractères et les compare sans
+   tenir compte de la casse : deux noms proches faisaient échouer l'export. */
+function workbookSheetNames(names) {
+  const taken = [], map = {}, changed = [];
+  names.forEach(original => {
+    const base = (String(original).replace(/[\\/?*\[\]:]/g, '_').slice(0, 31).trim()) || 'Feuille';
+    let final = base, i = 2;
+    while (taken.indexOf(final.toLowerCase()) !== -1) {
+      const suffix = '~' + i;
+      final = base.slice(0, 31 - suffix.length) + suffix;
+      i++;
+    }
+    taken.push(final.toLowerCase());
+    map[original] = final;
+    if (final !== original) changed.push(original + ' → ' + final);
+  });
+  return { map: map, changed: changed };
+}
+
+function buildWorkbook() {
+  const names = Object.keys(sheets);
+  const naming = workbookSheetNames(names);
+  const wb = XLSX.utils.book_new();
+  names.forEach(name => {
+    const ws = XLSX.utils.json_to_sheet(rowsForExport(name, false), {
+      header: headersForExport(name, false), cellDates: true, dateNF: 'dd/mm/yyyy'
+    });
+    XLSX.utils.book_append_sheet(wb, ws, naming.map[name]);
+  });
+  if (naming.changed.length) log('struct', 'Noms de feuille adaptés pour le classeur : ' + naming.changed.join(', '));
+  return wb;
+}
+
+function safeFileName(s) { return String(s).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || 'feuille'; }
+function uniqueFileName(base, taken) {
+  let name = base, i = 2;
+  while (taken.indexOf(name.toLowerCase()) !== -1) { name = base + ' (' + i + ')'; i++; }
+  taken.push(name.toLowerCase());
+  return name;
+}
+function exportBase() {
+  const base = fileLabel ? fileLabel.replace(/\s*\+\s*/g, '_').replace(/\.[^.]+$/, '') : 'classeur';
+  return safeFileName(base);
+}
+
+function exportBook(format) {
+  if (!hasData()) { alert('Chargez un fichier ou ajoutez des lignes avant d\'exporter.'); return; }
+  if (!ensureXlsx('L\'export ' + format)) return;
+  const extras = reconcileAll();
+  if (extras.length) log('struct', 'Colonnes réintégrées avant export : ' + extras.join(', '));
+  XLSX.writeFile(buildWorkbook(), exportBase() + '_' + stamp() + '.' + format);
+}
+
+function downloadText(filename, text) {
+  const blob = new Blob([text], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function sheetToCsv(name) {
+  if (!ensureXlsx('L\'export CSV')) return '';
+  reconcileColumns(sheets[name]);
+  const ws = XLSX.utils.json_to_sheet(rowsForExport(name, true), {
+    header: headersForExport(name, true), cellDates: true, dateNF: 'dd/mm/yyyy'
+  });
+  const sep = $('csvSep').value;
+  // Le BOM UTF-8 évite les accents cassés à l'ouverture dans Excel.
+  return '\uFEFF' + XLSX.utils.sheet_to_csv(ws, { FS: sep, dateNF: 'dd/mm/yyyy' });
+}
+
+function exportCsvCurrent() {
+  if (!currentSheet) { alert('Aucune feuille sélectionnée.'); return; }
+  const text = sheetToCsv(currentSheet);
+  if (!text) return;
+  downloadText(exportBase() + '-' + safeFileName(currentSheet) + '_' + stamp() + '.csv', text);
+}
+
+function exportCsvAll() {
+  const names = Object.keys(sheets);
+  if (!names.length) { alert('Aucune donnée à exporter.'); return; }
+  if (!ensureXlsx('L\'export CSV')) return;
+  // safeFileName rendait « Ventes/2025 » et « Ventes_2025 » identiques : on numérote.
+  const taken = [];
+  const plan = names.map(name => ({
+    name: name,
+    file: uniqueFileName(exportBase() + '-' + safeFileName(name) + '_' + stamp(), taken) + '.csv'
+  }));
+  plan.forEach((item, i) => setTimeout(() => downloadText(item.file, sheetToCsv(item.name)), i * 400));
+}
+
+function exportJournalCsv() {
+  if (!journal.length) { alert('Le journal est vide.'); return; }
+  const sep = $('csvSep').value;
+  const q = v => '"' + String(csvSafe(String(v))).replace(/"/g, '""') + '"';
+  const lines = [['Horodatage', 'Feuille', 'Type', 'Détail'].map(q).join(sep)];
+  journal.slice().reverse().forEach(e => {
+    lines.push([new Date(e.ts).toLocaleString('fr-FR'), e.sheet, kindLabel(e.kind), e.text].map(q).join(sep));
+  });
+  downloadText('journal_modifications_' + stamp() + '.csv', '\uFEFF' + lines.join('\r\n'));
+}
+
+/* =====================================================================
+   10. Mutations, historique, annulation
+   ===================================================================== */
+function snapshot() {
+  undoStack.push(JSON.stringify({
+    sheets: sheets, currentSheet: currentSheet, fileLabel: fileLabel, docKey: docKey, docMeta: docMeta
+  }));
+  if (undoStack.length > 40) undoStack.shift();
+  $('undoBtn').disabled = false;
+}
+
+function log(kind, text) {
+  journal.unshift({ ts: new Date().toISOString(), sheet: currentSheet, kind: kind, text: text });
+  if (journal.length > 500) journal.pop();
+  renderJournal();
+}
+
+// toute modification passe par ici : snapshot, recalculs, journal, sauvegarde, rendu
+function mutate(kind, text, fn) {
+  snapshot();
+  fn();
+  recomputeAll();
+  log(kind, text);
+  scheduleSave();
+  refreshSheetSelect();
+  render();
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  const state = JSON.parse(undoStack.pop());
+  sheets = state.sheets;
+  currentSheet = state.currentSheet;
+  const keyChanged = state.docKey !== docKey;
+  fileLabel = state.fileLabel || '';
+  docKey = state.docKey || 'nouveau-document';
+  docMeta = state.docMeta || null;
+  $('undoBtn').disabled = undoStack.length === 0;
+  recomputeAll();
+  refreshDocLabel();
+  if (keyChanged) claimDocument(fileLabel);
+  log('struct', 'Annulation de la dernière action');
+  scheduleSave();
+  refreshSheetSelect(true);
+  buildForm();
+  render();
+}
+
+/* =====================================================================
+   11. Feuilles et colonnes
+   ===================================================================== */
+function refreshSheetSelect(resetSelection) {
+  const select = $('sheetSelect');
+  select.innerHTML = '';
+  Object.keys(sheets).forEach(name => {
+    const o = document.createElement('option');
+    o.value = name;
+    o.textContent = name + ' (' + sheets[name].rows.length + ' lignes)';
+    select.appendChild(o);
+  });
+  if (resetSelection || !sheets[currentSheet]) currentSheet = Object.keys(sheets)[0] || '';
+  select.value = currentSheet;
+  $('sheetBar').style.display = hasData() ? 'flex' : 'none';
+}
+
+$('sheetSelect').addEventListener('change', () => {
+  currentSheet = $('sheetSelect').value;
+  sortCol = ''; page = 1; $('searchInput').value = '';
+  if (fileHandle && linkedType === 'csv') refreshLinkedStatus('la feuille écrite dans le fichier a changé', 'pending');
+  resetForm(); buildForm(); render();
+});
+
+$('renameSheet').addEventListener('click', () => {
+  if (!currentSheet) return;
+  const name = (prompt('Nouveau nom de la feuille :', currentSheet) || '').trim();
+  if (!name || name === currentSheet) return;
+  const old = currentSheet;
+  const final = uniqueName(name, Object.keys(sheets).filter(n => n !== old));
+  mutate('struct', 'Feuille « ' + old + ' » renommée en « ' + final + ' »', () => {
+    const next = {};
+    Object.keys(sheets).forEach(n => { next[n === old ? final : n] = sheets[n]; });
+    sheets = next; currentSheet = final;
+  });
+  refreshSheetSelect(); $('sheetSelect').value = currentSheet;
+});
+
+$('deleteSheet').addEventListener('click', () => {
+  if (!currentSheet) return;
+  if (Object.keys(sheets).length === 1) { alert('Un classeur doit garder au moins une feuille.'); return; }
+  if (!confirm('Supprimer la feuille « ' + currentSheet + ' » et ses ' + sheet().rows.length + ' lignes ?')) return;
+  const old = currentSheet;
+  mutate('del', 'Feuille « ' + old + ' » supprimée', () => {
+    delete sheets[old];
+    currentSheet = Object.keys(sheets)[0];
+  });
+  refreshSheetSelect(); $('sheetSelect').value = currentSheet; buildForm(); render();
+});
+
+function addColumn(name, type, index, formula) {
+  const sh = sheet();
+  const final = uniqueName(name, sh.columns.map(c => c.key));
+  const col = { key: final, type: type };
+  if (formula) col.formula = formula;
+  mutate('struct', 'Colonne « ' + final + ' » ajoutée (' + (formula ? 'calculée : ' + FORMULAS[formula.op].label(formula.args) : type) + ')', () => {
+    sh.columns.splice(index + 1, 0, col);
+    sh.rows.forEach(r => { r[final] = ''; });
+  });
+  buildForm(); render();
+  return final;
+}
+
+function renameColumn(key) {
+  const sh = sheet();
+  const name = (prompt('Nouveau nom de la colonne :', key) || '').trim();
+  if (!name || name === key) return;
+  const final = uniqueName(name, sh.columns.filter(c => c.key !== key).map(c => c.key));
+  mutate('struct', 'Colonne « ' + key + ' » renommée en « ' + final + ' »', () => {
+    sh.columns.forEach(c => { if (c.key === key) c.key = final; });
+    sh.rows.forEach(r => { r[final] = cellValue(r, key); delete r[key]; });
+    retargetFormulas(sh, key, final);
+    if (sortCol === key) sortCol = final;
+  });
+  buildForm(); render();
+}
+
+function deleteColumn(key) {
+  const sh = sheet();
+  if (sh.columns.length === 1) { alert('Une feuille doit garder au moins une colonne.'); return; }
+  if (!confirm('Supprimer la colonne « ' + key + ' » et toutes ses valeurs ?')) return;
+  mutate('del', 'Colonne « ' + key + ' » supprimée', () => {
+    const frozen = freezeFormulasUsing(sh, key);
+    sh.columns = sh.columns.filter(c => c.key !== key);
+    sh.rows.forEach(r => { delete r[key]; });
+    if (sortCol === key) sortCol = '';
+    if (frozen.length) log('struct', 'Colonne(s) calculée(s) figée(s), leur source a disparu : ' + frozen.join(', '));
+  });
+  buildForm(); render();
+}
+
+function changeColumnType(key) {
+  const sh = sheet();
+  const col = sh.columns.find(c => c.key === key);
+  if (!col) return;
+  const type = (prompt('Type de la colonne « ' + key + ' » : texte, nombre ou date ?',
+    col.type === 'number' ? 'nombre' : col.type === 'date' ? 'date' : 'texte') || '').toLowerCase();
+  if (!type) return;
+  const t = type.startsWith('n') ? 'number' : type.startsWith('d') ? 'date' : 'text';
+  if (t === col.type) return;
+
+  // passer en nombre abîme les codes postaux et les numéros de téléphone
+  if (t === 'number') {
+    const risky = sh.rows.filter(r => {
+      const v = cellValue(r, key);
+      return typeof v === 'string' && v !== '' && (hasLeadingZero(v) || tooManyDigits(v));
+    }).length;
+    if (risky && !confirm(risky + ' valeur(s) de « ' + key + ' » seraient abîmées en type nombre : ' +
+        'un zéro initial disparaît (01234 devient 1234) et au-delà de quinze chiffres la précision saute.\n\n' +
+        'OK = convertir quand même. Annuler = garder le type texte.')) return;
+  }
+  mutate('struct', 'Colonne « ' + key + ' » passée en ' + t, () => {
+    col.type = t;
+    if (t !== 'text') delete col.guard;
+    sh.rows.forEach(r => { r[key] = coerce(col, cellValue(r, key)); });
+  });
+  buildForm(); render();
+}
+
+function unfreezeColumn(key) {
+  const sh = sheet();
+  const col = sh.columns.find(c => c.key === key);
+  if (!col || !col.formula) return;
+  mutate('struct', 'Colonne « ' + key + ' » convertie en valeurs figées', () => { delete col.formula; });
+  buildForm(); render();
+}
+
+/* --------------------------------------------------------- menu colonne */
+const colMenu = $('colMenu');
+function openColMenu(key, x, y) {
+  colMenu.innerHTML = '';
+  const col = sheet().columns.find(c => c.key === key) || {};
+  const actions = [
+    ['Trier sur cette colonne', () => sortBy(key)],
+    ['Renommer', () => renameColumn(key)],
+    ['Changer le type', () => changeColumnType(key)],
+    ['Insérer une colonne après', () => openColumnDialog(sheet().columns.findIndex(c => c.key === key))],
+    ['Supprimer la colonne', () => deleteColumn(key)]
+  ];
+  if (computedColumn(col)) actions.splice(3, 0, ['Convertir en valeurs figées', () => unfreezeColumn(key)]);
+  actions.forEach(([label, fn]) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.addEventListener('click', () => { colMenu.style.display = 'none'; fn(); });
+    colMenu.appendChild(b);
+  });
+  colMenu.style.left = x + 'px';
+  colMenu.style.top = y + 'px';
+  colMenu.style.display = 'block';
+}
+document.addEventListener('click', e => { if (!colMenu.contains(e.target)) colMenu.style.display = 'none'; });
+
+/* =====================================================================
+   12. Popin « + Colonne » : calculs proposés selon les types
+   ===================================================================== */
+function columnsOfType(sh, type) { return sh.columns.filter(c => c.type === type && !computedColumn(c)); }
+
+function filledCount(sh, key) {
+  let n = 0;
+  sh.rows.forEach(r => { const v = cellValue(r, key); if (v !== '' && v !== null && v !== undefined) n++; });
+  return n;
+}
+function score(key, words) {
+  const k = String(key).toLowerCase();
+  return words.reduce((n, w) => n + (k.includes(w) ? 1 : 0), 0);
+}
+/* Ordonne une paire de dates : le « début » d'abord, d'après le nom puis
+   d'après les valeurs. */
+function orderPair(sh, a, b) {
+  const sa = score(a.key, START_WORDS) - score(a.key, END_WORDS);
+  const sb = score(b.key, START_WORDS) - score(b.key, END_WORDS);
+  if (sa !== sb) return sa > sb ? [a, b] : [b, a];
+  let gap = 0;
+  sh.rows.slice(0, 200).forEach(r => {
+    const d1 = toDate(cellValue(r, a.key)), d2 = toDate(cellValue(r, b.key));
+    if (d1 && d2) gap += (d2 - d1);
+  });
+  return gap >= 0 ? [a, b] : [b, a];
+}
+function averageGapDays(sh, a, b) {
+  let sum = 0, n = 0;
+  sh.rows.slice(0, 500).forEach(r => {
+    const d1 = toDate(cellValue(r, a)), d2 = toDate(cellValue(r, b));
+    if (d1 && d2) { sum += Math.abs(d2 - d1) / 86400000; n++; }
+  });
+  return n ? sum / n : 0;
+}
+function pairsCovered(sh, a, b) {
+  let n = 0;
+  sh.rows.forEach(r => { if (toDate(cellValue(r, a)) && toDate(cellValue(r, b))) n++; });
+  return n;
+}
+/* Une colonne d'années : des entiers entre 1900 et 2100, ou un intitulé qui le dit. */
+function isYearColumn(sh, col) {
+  if (col.type !== 'number') return false;
+  const named = /ann[ée]e|year|exercice|promo|millesime|millésime/i.test(col.key);
+  let ok = 0, total = 0;
+  sh.rows.forEach(r => {
+    const v = numberOf(cellValue(r, col.key));
+    if (v === null) return;
+    total++;
+    if (Number.isInteger(v) && v >= 1900 && v <= 2100) ok++;
+  });
+  if (!total) return false;
+  return ok === total && (named || total >= 2);
+}
+function looksLikeEmail(sh, key) {
+  let ok = 0, total = 0;
+  sh.rows.slice(0, 200).forEach(r => {
+    const v = String(cellValue(r, key) ?? '').trim();
+    if (!v) return;
+    total++;
+    if (/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(v)) ok++;
+  });
+  return total >= 2 && ok / total > 0.6;
+}
+
+function suggestionPreview(sh, formula) {
+  const def = FORMULAS[formula.op];
+  const ctx = def.context ? def.context(sh, formula.args) : null;
+  const out = [];
+  for (let i = 0; i < sh.rows.length && out.length < 3; i++) {
+    const v = def.compute(sh.rows[i], formula.args, ctx);
+    if (v !== '' && v !== null && v !== undefined) out.push('ligne ' + (i + 1) + ' → ' + v);
+  }
+  return out;
+}
+
+function buildColumnSuggestions(sh) {
+  const out = [];
+  const dates = columnsOfType(sh, 'date');
+  const numbers = columnsOfType(sh, 'number');
+  const texts = columnsOfType(sh, 'text');
+  const years = numbers.filter(c => isYearColumn(sh, c));
+  const plainNumbers = numbers.filter(c => years.indexOf(c) === -1);
+
+  // 1. paires de dates : la durée est le calcul le plus demandé
+  const datePairs = [];
+  for (let i = 0; i < dates.length; i++) {
+    for (let j = i + 1; j < dates.length; j++) {
+      const ordered = orderPair(sh, dates[i], dates[j]);
+      const covered = pairsCovered(sh, ordered[0].key, ordered[1].key);
+      if (!covered) continue;
+      datePairs.push({ a: ordered[0].key, b: ordered[1].key, covered: covered, gap: averageGapDays(sh, ordered[0].key, ordered[1].key) });
+    }
+  }
+  datePairs.sort((x, y) => y.covered - x.covered);
+  datePairs.slice(0, 4).forEach(p => {
+    const args = { a: p.a, b: p.b };
+    out.push({ op: 'joursEntre', args: args, name: 'Jours entre ' + p.a + ' et ' + p.b,
+      why: p.covered + ' ligne(s) ont les deux dates renseignées.' });
+    if (p.gap > 55) out.push({ op: 'moisEntre', args: args, name: 'Mois entre ' + p.a + ' et ' + p.b,
+      why: 'L\'écart moyen est de ' + Math.round(p.gap) + ' jours : le mois est plus lisible.' });
+    if (p.gap > 400) out.push({ op: 'anneesEntre', args: args, name: 'Années entre ' + p.a + ' et ' + p.b,
+      why: 'L\'écart moyen dépasse un an.' });
+  });
+
+  // 2. colonnes d'années : simple différence
+  for (let i = 0; i < years.length; i++) {
+    for (let j = i + 1; j < years.length; j++) {
+      const ordered = [years[i], years[j]];
+      out.push({ op: 'ecartAnnees', args: { a: ordered[0].key, b: ordered[1].key },
+        name: 'Écart en années entre ' + ordered[0].key + ' et ' + ordered[1].key,
+        why: 'Deux colonnes d\'années ont été repérées.' });
+    }
+  }
+
+  // 3. une seule date : année, mois, trimestre, ancienneté
+  dates.slice(0, 3).forEach(col => {
+    const filled = filledCount(sh, col.key);
+    if (!filled) return;
+    out.push({ op: 'anneeDe', args: { a: col.key }, name: 'Année de ' + col.key, why: 'Utile pour regrouper ou faire une synthèse.' });
+    out.push({ op: 'moisDe', args: { a: col.key }, name: 'Mois de ' + col.key, why: 'Format AAAA-MM, qui se trie correctement.' });
+    out.push({ op: 'trimestreDe', args: { a: col.key }, name: 'Trimestre de ' + col.key, why: 'Regroupement par trimestre.' });
+    if (score(col.key, END_WORDS) === 0)
+      out.push({ op: 'joursDepuis', args: { a: col.key }, name: 'Ancienneté en jours depuis ' + col.key,
+        why: 'Calculé par rapport à aujourd\'hui, recalculé à chaque modification.' });
+  });
+
+  // 4. paires de nombres
+  for (let i = 0; i < plainNumbers.length && out.length < 40; i++) {
+    for (let j = i + 1; j < plainNumbers.length; j++) {
+      const a = plainNumbers[i].key, b = plainNumbers[j].key;
+      const qty = /quantit|nombre|nb|qte|qté|unit/i;
+      const price = /prix|tarif|montant|coût|cout|unitaire|pu\b/i;
+      if (qty.test(a) && price.test(b)) out.push({ op: 'produit', args: { a: a, b: b }, name: a + ' × ' + b, why: 'Une quantité et un prix : le total par ligne.' });
+      else if (qty.test(b) && price.test(a)) out.push({ op: 'produit', args: { a: b, b: a }, name: b + ' × ' + a, why: 'Une quantité et un prix : le total par ligne.' });
+      out.push({ op: 'difference', args: { a: a, b: b }, name: b + ' − ' + a, why: 'Écart entre les deux colonnes.' });
+      out.push({ op: 'pourcentage', args: { a: a, b: b }, name: a + ' en % de ' + b, why: 'Proportion d\'une colonne par rapport à l\'autre.' });
+    }
+  }
+  // 5. un seul nombre : part du total
+  plainNumbers.slice(0, 2).forEach(col => {
+    if (filledCount(sh, col.key) >= 2)
+      out.push({ op: 'partDuTotal', args: { a: col.key }, name: 'Part de ' + col.key + ' dans le total', why: 'Chaque ligne rapportée à la somme de la colonne.' });
+  });
+
+  // 6. texte
+  const mail = texts.find(c => looksLikeEmail(sh, c.key));
+  if (mail) out.push({ op: 'domaineMail', args: { a: mail.key }, name: 'Domaine de ' + mail.key, why: 'Ces valeurs ressemblent à des adresses e-mail.' });
+  if (texts.length >= 2 && filledCount(sh, texts[0].key) && filledCount(sh, texts[1].key))
+    out.push({ op: 'concat', args: { a: texts[0].key, b: texts[1].key }, name: texts[0].key + ' et ' + texts[1].key + ' réunis',
+      why: 'Par exemple un prénom et un nom dans une seule colonne.' });
+
+  // on ne garde que les calculs qui produisent réellement quelque chose
+  return out.map(s => {
+    const preview = suggestionPreview(sh, { op: s.op, args: s.args });
+    return Object.assign({}, s, { preview: preview });
+  }).filter(s => s.preview.length).slice(0, 12);
+}
+
+function openColumnDialog(afterIndex) {
+  if (!currentSheet) { alert('Chargez ou créez une feuille avant d\'ajouter une colonne.'); return; }
+  const sh = sheet();
+  const pos = $('newColPos');
+  pos.innerHTML = '';
+  sh.columns.forEach((c, i) => {
+    const o = document.createElement('option');
+    o.value = String(i); o.textContent = c.key;
+    pos.appendChild(o);
+  });
+  const def = document.createElement('option');
+  def.value = String(sh.columns.length - 1); def.textContent = '(à la fin)';
+  pos.appendChild(def);
+  pos.value = String(typeof afterIndex === 'number' && afterIndex >= 0 ? afterIndex : sh.columns.length - 1);
+
+  $('newColName').value = '';
+  $('newColType').value = 'text';
+  renderColumnSuggestions(sh);
+  $('columnDialog').showModal();
+  $('newColName').focus();
+}
+
+function renderColumnSuggestions(sh) {
+  const box = $('colSuggestions');
+  box.innerHTML = '';
+  const list = buildColumnSuggestions(sh);
+  $('colSuggEmpty').style.display = list.length ? 'none' : 'block';
+  list.forEach(s => {
+    const def = FORMULAS[s.op];
+    const card = el('div', 'sugg');
+    const main = el('div', 'sugg-main');
+    main.appendChild(el('h4', null, s.name));
+    main.appendChild(el('p', null, def.label(s.args) + ' — ' + s.why));
+    main.appendChild(el('div', 'preview', 'Aperçu : ' + s.preview.join(' · ')));
+    const act = el('div', 'sugg-actions');
+    const btn = el('button', 'btn-primary btn-icon', 'Ajouter');
+    btn.addEventListener('click', () => {
+      $('columnDialog').close();
+      addColumn(s.name, def.type, sheet().columns.length - 1, { op: s.op, args: s.args });
+    });
+    act.appendChild(btn);
+    card.appendChild(main); card.appendChild(act);
+    box.appendChild(card);
+  });
+}
+
+$('addColumn').addEventListener('click', () => openColumnDialog(sheet().columns.length - 1));
+$('createColumnBtn').addEventListener('click', () => {
+  const name = $('newColName').value.trim();
+  if (!name) { $('newColName').focus(); return; }
+  const index = parseInt($('newColPos').value, 10);
+  $('columnDialog').close();
+  addColumn(name, $('newColType').value, isNaN(index) ? sheet().columns.length - 1 : index, null);
+});
+$('closeColumnBtn').addEventListener('click', () => $('columnDialog').close());
+$('closeColumnX').addEventListener('click', () => $('columnDialog').close());
+
+/* =====================================================================
+   13. Popin « + Feuille » : regroupements proposés
+   ===================================================================== */
+
+/* Une colonne fait catégorie dès que deux lignes au moins partagent une
+   même valeur, et que le nombre de valeurs distinctes reste raisonnable. */
+function groupsOf(sh, key, mapper) {
+  const counts = new Map();
+  let filled = 0;
+  sh.rows.forEach(r => {
+    const v = mapper ? mapper(cellValue(r, key)) : String(cellValue(r, key) ?? '').trim();
+    if (v === '' || v === null || v === undefined) return;
+    filled++;
+    counts.set(v, (counts.get(v) || 0) + 1);
+  });
+  return { groups: Array.from(counts.entries()).sort((a, b) => b[1] - a[1]), filled: filled };
+}
+
+function categoryColumns(sh) {
+  const out = [];
+  sh.columns.forEach(col => {
+    if (col.type === 'date') return;
+    const g = groupsOf(sh, col.key);
+    if (g.groups.length < 2 || g.groups.length > 40) return;
+    if (g.groups[0][1] < 2) return;                             // aucune valeur partagée par deux lignes
+    if (g.groups.length > Math.max(2, g.filled * 0.7)) return;  // trop proche d'un identifiant
+    out.push({ col: col, groups: g.groups, filled: g.filled });
+  });
+  return out.sort((a, b) => b.groups[0][1] - a.groups[0][1]);
+}
+
+function sheetsWithSameShape() {
+  const byShape = new Map();
+  Object.keys(sheets).forEach(name => {
+    const keys = sheets[name].columns.map(c => c.key).slice().sort().join('');
+    if (!byShape.has(keys)) byShape.set(keys, []);
+    byShape.get(keys).push(name);
+  });
+  return Array.from(byShape.values()).filter(list => list.length >= 2);
+}
+
+function previewGroups(groups) {
+  return groups.slice(0, 4).map(g => g[0] + ' (' + g[1] + ')').join(' · ') + (groups.length > 4 ? ' · …' : '');
+}
+
+function splitSheetBy(sourceName, key, mapper, labelPrefix) {
+  const src = sheets[sourceName];
+  const g = groupsOf(src, key, mapper);
+  if (g.groups.length > 12 && !confirm('Cette séparation créerait ' + g.groups.length + ' feuilles. Continuer ?')) return;
+  const created = [];
+  mutate('struct', 'Feuille « ' + sourceName + ' » séparée par « ' + key + ' » en ' + g.groups.length + ' feuille(s)', () => {
+    g.groups.forEach(pair => {
+      const value = pair[0];
+      const name = uniqueName((labelPrefix || sourceName) + ' — ' + value, Object.keys(sheets));
+      sheets[name] = {
+        columns: src.columns.map(c => {
+          const copy = { key: c.key, type: c.type };
+          if (c.formula) copy.formula = { op: c.formula.op, args: Object.assign({}, c.formula.args) };
+          return copy;
+        }),
+        rows: src.rows.filter(r => {
+          const v = mapper ? mapper(cellValue(r, key)) : String(cellValue(r, key) ?? '').trim();
+          return v === value;
+        }).map(r => Object.assign({}, r))
+      };
+      created.push(name);
+    });
+    currentSheet = created[0] || currentSheet;
+  });
+  refreshSheetSelect(); $('sheetSelect').value = currentSheet; buildForm(); render();
+}
+
+function summarySheet(sourceName, key, mapper, title) {
+  const src = sheets[sourceName];
+  const g = groupsOf(src, key, mapper);
+  const numeric = src.columns.filter(c => c.type === 'number').slice(0, 3);
+  const label = uniqueName(key, ['Nombre de lignes']);
+  const columns = [{ key: label, type: 'text' }, { key: 'Nombre de lignes', type: 'number' }];
+  numeric.forEach(c => columns.push({ key: uniqueName('Somme de ' + c.key, columns.map(x => x.key)), type: 'number' }));
+  const rows = g.groups.map(pair => {
+    const value = pair[0], count = pair[1];
+    const row = {};
+    row[label] = value;
+    row['Nombre de lignes'] = count;
+    numeric.forEach((c, i) => {
+      let total = 0;
+      src.rows.forEach(r => {
+        const v = mapper ? mapper(cellValue(r, key)) : String(cellValue(r, key) ?? '').trim();
+        if (v !== value) return;
+        const n = numberOf(cellValue(r, c.key));
+        if (n !== null) total += n;
+      });
+      row[columns[2 + i].key] = round2(total);
+    });
+    return row;
+  });
+  const name = uniqueName(title, Object.keys(sheets));
+  mutate('struct', 'Feuille de synthèse « ' + name + ' » créée depuis « ' + sourceName + ' »', () => {
+    sheets[name] = { columns: columns, rows: rows };
+    currentSheet = name;
+  });
+  refreshSheetSelect(); $('sheetSelect').value = currentSheet; buildForm(); render();
+}
+
+function mergeSheets(names) {
+  const first = sheets[names[0]];
+  const columns = first.columns.map(c => ({ key: c.key, type: c.type }));
+  const originKey = uniqueName("Feuille d'origine", columns.map(c => c.key));
+  columns.push({ key: originKey, type: 'text' });
+  const rows = [];
+  names.forEach(n => sheets[n].rows.forEach(r => {
+    const row = Object.assign({}, r);
+    row[originKey] = n;
+    rows.push(row);
+  }));
+  const name = uniqueName('Fusion — ' + names.join(' + '), Object.keys(sheets));
+  mutate('struct', 'Feuilles fusionnées (' + names.join(', ') + ') dans « ' + name + ' »', () => {
+    sheets[name] = { columns: columns, rows: rows };
+    currentSheet = name;
+  });
+  refreshSheetSelect(); $('sheetSelect').value = currentSheet; buildForm(); render();
+}
+
+function buildSheetSuggestions() {
+  const out = [];
+  const sh = sheet();
+  const name = currentSheet;
+  if (sh.rows.length) {
+    categoryColumns(sh).slice(0, 4).forEach(cat => {
+      out.push({
+        title: 'Une feuille par valeur de « ' + cat.col.key + ' »',
+        detail: cat.groups.length + ' feuille(s) créée(s) ; la feuille d\'origine est conservée telle quelle.',
+        preview: previewGroups(cat.groups),
+        run: () => splitSheetBy(name, cat.col.key, null, name)
+      });
+      out.push({
+        title: 'Synthèse par « ' + cat.col.key + ' »',
+        detail: 'Une ligne par valeur, avec le nombre de lignes' +
+          (sh.columns.some(c => c.type === 'number') ? ' et la somme des colonnes numériques.' : '.'),
+        preview: previewGroups(cat.groups),
+        run: () => summarySheet(name, cat.col.key, null, 'Synthèse ' + cat.col.key)
+      });
+    });
+
+    sh.columns.filter(c => c.type === 'date').slice(0, 2).forEach(col => {
+      const yearOf = v => { const d = toDate(v); return d ? String(d.getFullYear()) : ''; };
+      const monthOf = v => { const d = toDate(v); return d ? d.getFullYear() + '-' + p2(d.getMonth() + 1) : ''; };
+      const byYear = groupsOf(sh, col.key, yearOf);
+      if (byYear.groups.length >= 2 && byYear.groups[0][1] >= 2) {
+        out.push({
+          title: 'Synthèse par année de « ' + col.key + ' »',
+          detail: 'Regroupe les lignes selon l\'année de cette date.',
+          preview: previewGroups(byYear.groups),
+          run: () => summarySheet(name, col.key, yearOf, 'Synthèse ' + col.key + ' par année')
+        });
+      }
+      const byMonth = groupsOf(sh, col.key, monthOf);
+      if (byMonth.groups.length >= 2 && byMonth.groups[0][1] >= 2 && byMonth.groups.length <= 40) {
+        out.push({
+          title: 'Synthèse par mois de « ' + col.key + ' »',
+          detail: 'Une ligne par mois, au format AAAA-MM.',
+          preview: previewGroups(byMonth.groups),
+          run: () => summarySheet(name, col.key, monthOf, 'Synthèse ' + col.key + ' par mois')
+        });
+      }
+    });
+  }
+
+  sheetsWithSameShape().slice(0, 2).forEach(list => {
+    out.push({
+      title: 'Fusionner ' + list.length + ' feuilles de même structure',
+      detail: 'Les feuilles ' + list.join(', ') + ' ont exactement les mêmes colonnes.',
+      preview: 'Une colonne « Feuille d\'origine » est ajoutée pour retrouver la provenance.',
+      run: () => mergeSheets(list)
+    });
+  });
+
+  return out;
+}
+
+function openSheetDialog() {
+  $('newSheetName').value = '';
+  $('newSheetModel').value = 'empty';
+  const box = $('sheetSuggestions');
+  box.innerHTML = '';
+  const list = buildSheetSuggestions();
+  $('sheetSuggEmpty').style.display = list.length ? 'none' : 'block';
+  list.forEach(s => {
+    const card = el('div', 'sugg');
+    const main = el('div', 'sugg-main');
+    main.appendChild(el('h4', null, s.title));
+    main.appendChild(el('p', null, s.detail));
+    main.appendChild(el('div', 'preview', s.preview));
+    const act = el('div', 'sugg-actions');
+    const btn = el('button', 'btn-primary btn-icon', 'Créer');
+    btn.addEventListener('click', () => { $('sheetDialog').close(); s.run(); });
+    act.appendChild(btn);
+    card.appendChild(main); card.appendChild(act);
+    box.appendChild(card);
+  });
+  $('sheetDialog').showModal();
+  $('newSheetName').focus();
+}
+
+$('addSheet').addEventListener('click', openSheetDialog);
+$('createSheetBtn').addEventListener('click', () => {
+  const raw = $('newSheetName').value.trim();
+  if (!raw) { $('newSheetName').focus(); return; }
+  const model = $('newSheetModel').value;
+  const final = uniqueName(raw, Object.keys(sheets));
+  const base = sheet();
+  $('sheetDialog').close();
+  mutate('struct', 'Feuille « ' + final + ' » créée', () => {
+    sheets[final] = {
+      columns: (model === 'copy' && base.columns.length)
+        ? base.columns.map(c => ({ key: c.key, type: c.type }))
+        : [{ key: 'Colonne 1', type: 'text' }],
+      rows: []
+    };
+    currentSheet = final;
+  });
+  refreshSheetSelect(); $('sheetSelect').value = currentSheet; buildForm(); render();
+});
+$('closeSheetBtn').addEventListener('click', () => $('sheetDialog').close());
+$('closeSheetX').addEventListener('click', () => $('sheetDialog').close());
+
+/* =====================================================================
+   14. Formulaire de saisie
+   ===================================================================== */
+function buildForm() {
+  const wrap = $('fields');
+  wrap.innerHTML = '';
+  const cols = sheet().columns;
+
+  if (!cols.length) {
+    wrap.appendChild(el('span', 'hint', "Cette feuille n'a pas encore de colonne. Utilisez « + Colonne » pour en créer une."));
+    $('formActions').style.display = 'flex';
+    $('saveBtn').style.display = 'none';
+    return;
+  }
+  $('formActions').style.display = 'flex';
+  $('saveBtn').style.display = 'inline-block';
+
+  cols.forEach(col => {
+    const group = el('div', 'field');
+    const calc = computedColumn(col);
+    const label = el('label', null, col.key + (calc ? ' (calculée)' : ''));
+    const input = document.createElement('input');
+    input.type = col.type === 'date' ? 'date' : col.type === 'number' ? 'number' : 'text';
+    if (col.type === 'number') input.step = 'any';
+    input.className = 'dynamic-field';
+    input.dataset.key = col.key;
+    if (calc) {
+      input.disabled = true;
+      input.placeholder = FORMULAS[col.formula.op].label(col.formula.args);
+      input.title = 'Cette valeur est calculée automatiquement.';
+    } else {
+      input.placeholder = col.key;
+      if (col.guard) input.title = 'Colonne gardée en texte (' + col.guard + ') pour ne pas abîmer les valeurs.';
+    }
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); saveRow(); }
+      if (e.key === 'Escape') { e.preventDefault(); closeRowDialog(); }
+    });
+    group.appendChild(label); group.appendChild(input);
+    wrap.appendChild(group);
+  });
+}
+
+/* Une saisie « 01234 » dans une colonne nombre perd son zéro sans prévenir :
+   on propose de basculer la colonne en texte plutôt que d'abîmer la valeur. */
+function guardNumeric(cols, values) {
+  const risky = cols.filter(c => {
+    if (c.type !== 'number' || computedColumn(c)) return false;
+    const raw = values[c.key];
+    return typeof raw === 'string' && raw !== '' && (hasLeadingZero(raw) || tooManyDigits(raw));
+  });
+  if (!risky.length) return [];
+  const names = risky.map(c => '« ' + c.key + ' »').join(', ');
+  const ok = confirm('Colonne(s) de type nombre : ' + names + '.\n\n' +
+    'La saisie perdrait son zéro initial (01234 devient 1234) ou sa précision au-delà de quinze chiffres.\n\n' +
+    'OK = passer ces colonnes en texte et conserver la saisie exacte.\n' +
+    'Annuler = enregistrer la valeur numérique.');
+  return ok ? risky : [];
+}
+
+function saveRow() {
+  const editIndex = parseInt($('editIndex').value, 10);
+  const inputs = document.querySelectorAll('.dynamic-field');
+  const sh = sheet();
+  const raw = {}, cols = [];
+  let filled = false;
+
+  inputs.forEach(input => {
+    const col = sh.columns.find(c => c.key === input.dataset.key);
+    if (!col || computedColumn(col)) return;
+    cols.push(col);
+    raw[col.key] = input.value.trim();
+    if (raw[col.key] !== '') filled = true;
+  });
+
+  if (!filled) { alert("Renseignez au moins un champ avant d'enregistrer."); return; }
+
+  const retype = guardNumeric(cols, raw);
+  const values = {};
+  cols.forEach(col => {
+    const asText = retype.indexOf(col) !== -1;
+    values[col.key] = asText ? raw[col.key] : coerce(col, raw[col.key]);
+  });
+
+  if (editIndex === -1) {
+    mutate('add', 'Ligne ' + (sh.rows.length + 1) + ' ajoutée : ' + describeRow(values, sh.columns), () => {
+      retype.forEach(c => { c.type = 'text'; c.guard = 'saisie protégée'; });
+      sh.rows.push(values);
+    });
+    if (retype.length) buildForm();
+    // saisie en série : le formulaire reste ouvert, champs vidés
+    resetForm();
+    $('rowFeedback').textContent = 'Ligne ajoutée à « ' + currentSheet + ' »' +
+      (retype.length ? ' — colonne(s) passée(s) en texte' : '');
+    const first = document.querySelector('.dynamic-field:not([disabled])');
+    if (first) first.focus();
+    return;
+  }
+
+  const before = sh.rows[editIndex];
+  const changes = cols
+    .filter(c => String(cellValue(before, c.key) ?? '') !== String(values[c.key] ?? ''))
+    .map(c => c.key + ' : ' + shortValue(cellValue(before, c.key)) + ' → ' + shortValue(values[c.key]));
+  if (changes.length) {
+    mutate('edit', 'Ligne ' + (editIndex + 1) + ' modifiée — ' + changes.join(' ; '), () => {
+      retype.forEach(c => { c.type = 'text'; c.guard = 'saisie protégée'; });
+      // on garde les éventuelles clés hors schéma
+      sh.rows[editIndex] = Object.assign({}, before, values);
+    });
+    if (retype.length) buildForm();
+  }
+  closeRowDialog();
+}
+
+function describeRow(values, cols) {
+  return cols.slice(0, 3).map(c => c.key + ' : ' + shortValue(values[c.key])).join(' ; ');
+}
+
+function editRow(index) {
+  const row = sheet().rows[index];
+  document.querySelectorAll('.dynamic-field').forEach(input => {
+    const v = cellValue(row, input.dataset.key);
+    input.value = (v === null || v === undefined) ? '' : v;
+  });
+  $('editIndex').value = index;
+  $('saveBtn').textContent = 'Mettre à jour la ligne';
+  $('cancelBtn').style.display = 'inline-block';
+  openRowDialog('Modifier la ligne ' + (index + 1), false);
+}
+
+function openRowDialog(title, reset) {
+  if (!currentSheet) { alert('Chargez ou créez une feuille avant de saisir une ligne.'); return; }
+  if (reset) { resetForm(); $('rowFeedback').textContent = ''; }
+  $('rowDialogTitle').textContent = title;
+  const dlg = $('rowDialog');
+  if (!dlg.open) dlg.showModal();
+  const first = document.querySelector('.dynamic-field:not([disabled])');
+  if (first) first.focus();
+}
+
+function closeRowDialog() {
+  const dlg = $('rowDialog');
+  if (dlg.open) dlg.close();
+  resetForm();
+}
+
+function duplicateRow(index) {
+  const sh = sheet();
+  mutate('add', 'Ligne ' + (index + 1) + ' dupliquée', () => {
+    sh.rows.splice(index + 1, 0, Object.assign({}, sh.rows[index]));
+  });
+}
+
+function deleteRow(index) {
+  const sh = sheet();
+  const row = sh.rows[index];
+  if (!confirm('Supprimer la ligne ' + (index + 1) + ' ?')) return;
+  mutate('del', 'Ligne ' + (index + 1) + ' supprimée : ' + describeRow(row, sh.columns), () => {
+    sh.rows.splice(index, 1);
+  });
+  resetForm();
+}
+
+function resetForm() {
+  document.querySelectorAll('.dynamic-field').forEach(i => { if (!i.disabled) i.value = ''; });
+  $('editIndex').value = -1;
+  $('saveBtn').textContent = 'Ajouter la ligne';
+  $('cancelBtn').style.display = 'none';
+}
+
+/* =====================================================================
+   15. Rendu du tableau
+   ===================================================================== */
+function getView() {
+  const sh = sheet();
+  const term = $('searchInput').value.trim().toLowerCase();
+  let view = sh.rows.map((row, index) => ({ row: row, index: index }));
+
+  if (term) {
+    view = view.filter(item => sh.columns.some(c => String(cellValue(item.row, c.key) ?? '').toLowerCase().includes(term)));
+  }
+  if (sortCol) {
+    const col = sh.columns.find(c => c.key === sortCol);
+    view.sort((a, b) => {
+      let x = cellValue(a.row, sortCol), y = cellValue(b.row, sortCol);
+      const xe = x === '' || x === null || x === undefined;
+      const ye = y === '' || y === null || y === undefined;
+      if (xe && ye) return 0;
+      if (xe) return 1;                       // les vides toujours à la fin
+      if (ye) return -1;
+      if (col && col.type === 'number') { x = Number(x); y = Number(y); }
+      else { x = String(x).toLowerCase(); y = String(y).toLowerCase(); }
+      if (x < y) return sortAsc ? -1 : 1;
+      if (x > y) return sortAsc ? 1 : -1;
+      return 0;
+    });
+  }
+  return view;
+}
+
+function sortBy(key) {
+  if (sortCol === key) sortAsc = !sortAsc;
+  else { sortCol = key; sortAsc = true; }
+  page = 1;
+  render();
+}
+
+function renderHead() {
+  const head = $('tableHead');
+  head.innerHTML = '';
+  const cols = sheet().columns;
+  if (!cols.length) return;
+
+  const thIdx = el('th', null, '#');
+  thIdx.title = "Cliquez pour revenir à l'ordre du fichier";
+  thIdx.style.cursor = 'pointer';
+  thIdx.addEventListener('click', () => { sortCol = ''; render(); });
+  head.appendChild(thIdx);
+
+  cols.forEach(col => {
+    const th = document.createElement('th');
+    const inner = el('div', 'th-inner');
+
+    const calc = computedColumn(col);
+    const label = el('span', 'th-label',
+      col.key + (calc ? ' ƒ' : '') + (sortCol === col.key ? (sortAsc ? ' ▲' : ' ▼') : ''));
+    label.title = calc ? FORMULAS[col.formula.op].label(col.formula.args) + ' — cliquez pour trier'
+      : (col.guard ? 'Colonne en texte (' + col.guard + ') — cliquez pour trier' : 'Trier');
+    label.addEventListener('click', () => sortBy(col.key));
+
+    const menu = el('button', 'th-menu', '⋮');
+    menu.title = 'Options de la colonne';
+    menu.addEventListener('click', e => {
+      e.stopPropagation();
+      const r = menu.getBoundingClientRect();
+      openColMenu(col.key, r.left + window.scrollX, r.bottom + window.scrollY + 2);
+    });
+
+    inner.appendChild(label); inner.appendChild(menu);
+    th.appendChild(inner);
+    head.appendChild(th);
+  });
+
+  head.appendChild(el('th', null, 'Actions'));
+}
+
+function highlightInto(td, text, term) {
+  if (!term) { td.textContent = text; return; }
+  const re = new RegExp(escapeRegExp(term), 'gi');
+  let last = 0, m;
+  td.textContent = '';
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) td.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const mark = el('mark', null, m[0]);
+    td.appendChild(mark);
+    last = m.index + m[0].length;
+    if (m[0] === '') re.lastIndex++;
+  }
+  td.appendChild(document.createTextNode(text.slice(last)));
+}
+
+function render() {
+  renderHead();
+  const tbody = $('tableBody');
+  tbody.innerHTML = '';
+  const sh = sheet();
+  const term = $('searchInput').value.trim().toLowerCase();
+  const view = getView();
+
+  const size = parseInt($('pageSize').value, 10) || view.length || 1;
+  const pages = Math.max(1, Math.ceil(view.length / size));
+  if (page > pages) page = pages;
+  const slice = view.slice((page - 1) * size, page * size);
+
+  $('rowCount').textContent = view.length + ' ligne' + (view.length > 1 ? 's' : '') +
+    (term ? ' trouvée' + (view.length > 1 ? 's' : '') + ' sur ' + sh.rows.length : '');
+  $('pageInfo').textContent = 'Page ' + page + ' / ' + pages;
+  $('prevPage').disabled = page <= 1;
+  $('nextPage').disabled = page >= pages;
+
+  if (!slice.length) {
+    const tr = document.createElement('tr');
+    const td = el('td', 'empty', sh.rows.length
+      ? 'Aucune ligne ne correspond à cette recherche.'
+      : 'Cette feuille est vide. Ajoutez une ligne avec le formulaire ci-dessus.');
+    td.colSpan = sh.columns.length + 2;
+    tr.appendChild(td); tbody.appendChild(tr);
+    return;
+  }
+
+  slice.forEach(item => {
+    const tr = document.createElement('tr');
+    tr.appendChild(el('td', 'idx', String(item.index + 1)));
+
+    sh.columns.forEach(col => {
+      const td = document.createElement('td');
+      const calc = computedColumn(col);
+      const raw = cellValue(item.row, col.key);
+      let display = (raw === null || raw === undefined) ? '' : String(raw);
+      if (col.type === 'date' && display) display = isoToFr(display);
+      td.className = (col.type === 'number' ? 'num' : '') + (calc ? ' calc' : '');
+      highlightInto(td, display, term);
+      td.title = calc ? 'Valeur calculée : ' + FORMULAS[col.formula.op].label(col.formula.args)
+        : 'Double-cliquez pour modifier';
+      td.addEventListener('dblclick', () => {
+        if (calc) { alert('« ' + col.key + ' » est une colonne calculée.\n\n' + FORMULAS[col.formula.op].label(col.formula.args) + '\n\nModifiez ses colonnes sources, ou figez-la depuis le menu ⋮.'); return; }
+        startInlineEdit(td, item.index, col);
+      });
+      tr.appendChild(td);
+    });
+
+    const tdAct = document.createElement('td');
+    [['✏️', 'Modifier dans le formulaire', () => editRow(item.index)],
+     ['⧉', 'Dupliquer', () => duplicateRow(item.index)],
+     ['🗑️', 'Supprimer', () => deleteRow(item.index)]].forEach(action => {
+      const b = el('button', 'btn-quiet btn-icon', action[0]);
+      b.title = action[1];
+      b.addEventListener('click', action[2]);
+      tdAct.appendChild(b);
+    });
+    tr.appendChild(tdAct);
+    tbody.appendChild(tr);
+  });
+}
+
+function startInlineEdit(td, rowIndex, col) {
+  if (td.classList.contains('editing')) return;
+  const sh = sheet();
+  const original = cellValue(sh.rows[rowIndex], col.key);
+  td.classList.add('editing');
+  td.textContent = '';
+
+  const input = document.createElement('input');
+  input.type = col.type === 'date' ? 'date' : col.type === 'number' ? 'number' : 'text';
+  if (col.type === 'number') input.step = 'any';
+  input.value = (original === null || original === undefined) ? '' : original;
+  td.appendChild(input);
+  input.focus(); input.select();
+
+  let done = false;
+  const finish = commit => {
+    if (done) return; done = true;
+    td.classList.remove('editing');
+    const typed = input.value.trim();
+    if (!commit) { render(); return; }
+    const values = {}; values[col.key] = typed;
+    const retype = guardNumeric([col], values);
+    const next = retype.length ? typed : coerce(col, typed);
+    if (String(next) !== String(original ?? '')) {
+      mutate('edit', 'Ligne ' + (rowIndex + 1) + ' — ' + col.key + ' : ' + shortValue(original) + ' → ' + shortValue(next), () => {
+        retype.forEach(c => { c.type = 'text'; c.guard = 'saisie protégée'; });
+        sh.rows[rowIndex][col.key] = next;
+      });
+      if (retype.length) buildForm();
+    } else {
+      render();
+    }
+  };
+  input.addEventListener('blur', () => finish(true));
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+}
+
+/* =====================================================================
+   16. Journal
+   ===================================================================== */
+function kindLabel(kind) {
+  return kind === 'add' ? 'Ajout' : kind === 'edit' ? 'Modification' : kind === 'del' ? 'Suppression' : 'Structure';
+}
+
+function renderJournal() {
+  $('journalCount').textContent = journal.length;
+  const list = $('journalList');
+  list.innerHTML = '';
+  journal.slice(0, 120).forEach(e => {
+    const li = document.createElement('li');
+    const t = el('time', null, new Date(e.ts).toLocaleTimeString('fr-FR'));
+    const tag = el('span', 'tag tag-' + (e.kind === 'add' ? 'add' : e.kind === 'edit' ? 'edit' : e.kind === 'del' ? 'del' : 'struct'), kindLabel(e.kind));
+    const txt = el('span', null, (e.sheet ? '[' + e.sheet + '] ' : '') + e.text);
+    li.appendChild(t); li.appendChild(tag); li.appendChild(txt);
+    list.appendChild(li);
+  });
+}
+
+/* =====================================================================
+   17. Restauration : une session par document
+   ===================================================================== */
+function describeSession(meta) {
+  const bits = [meta.fileLabel || 'Document sans fichier'];
+  if (meta.docMeta && meta.docMeta.size) bits.push(humanSize(meta.docMeta.size));
+  if (meta.docMeta && meta.docMeta.lastModified)
+    bits.push('fichier du ' + new Date(meta.docMeta.lastModified).toLocaleString('fr-FR'));
+  return bits.join(' · ');
+}
+
+function applySession(saved) {
+  if (!saved || !saved.sheets) return;
+  sheets = {};
+  Object.keys(saved.sheets).forEach(name => {
+    const sh = saved.sheets[name];
+    const clean = sanitizeKeys(sh.rows || []);
+    sheets[name] = { columns: sh.columns || [], rows: clean.rows };
+  });
+  currentSheet = saved.currentSheet && sheets[saved.currentSheet] ? saved.currentSheet : Object.keys(sheets)[0] || '';
+  fileLabel = saved.fileLabel || '';
+  docMeta = saved.docMeta || null;
+  docKey = saved.docKey || docKeyFor(docMeta);
+  journal = saved.journal || [];
+  // la pile d'annulation n'est pas vidée : une restauration lancée depuis la
+  // liste des sessions reste réversible par Ctrl+Z
+  $('undoBtn').disabled = undoStack.length === 0;
+  const extras = reconcileAll();
+  if (extras.length) log('struct', 'Colonnes réintégrées à la restauration : ' + extras.join(', '));
+  recomputeAll();
+  refreshDocLabel();
+  $('restoreBanner').style.display = 'none';
+  refreshSheetSelect();
+  $('sheetSelect').value = currentSheet;
+  claimDocument(fileLabel);
+  buildForm(); render(); renderJournal(); setStatus('saved', 'Session restaurée, enregistrée dans le navigateur');
+}
+
+function restoreUi() {
+  const metas = listSessions();
+  if (!metas.length) return;
+  const meta = metas[0];
+  $('restoreText').textContent = 'Session du ' + frDateTime(meta.savedAt) + ' — ' + describeSession(meta) +
+    ' : ' + meta.sheetCount + ' feuille(s), ' + meta.rowCount + ' lignes.' +
+    (metas.length > 1 ? ' ' + (metas.length - 1) + ' autre(s) session(s) enregistrée(s).' : '');
+  $('restoreBanner').style.display = 'flex';
+  $('restoreBtn').onclick = () => applySession(readSession(meta.docKey));
+  $('discardBtn').onclick = () => {
+    if (!confirm('Supprimer la sauvegarde « ' + describeSession(meta) + ' » de ce navigateur ?')) return;
+    dropSession(meta.docKey);
+    $('restoreBanner').style.display = 'none';
+    restoreUi();
+  };
+}
+
+function openSessions() {
+  const metas = listSessions();
+  const body = $('sessionsBody');
+  body.innerHTML = '';
+  $('sessionsIntro').textContent = metas.length
+    ? 'Chaque document a sa propre sauvegarde : un fichier n\'écrase plus celle d\'un autre. Le nom seul ne suffit pas à distinguer deux fichiers, la taille et la date du fichier d\'origine sont donc rappelées.'
+    : 'Aucune session enregistrée dans ce navigateur pour l\'instant.';
+  let bytes = 0;
+  metas.forEach(meta => {
+    bytes += meta.bytes || 0;
+    const tr = document.createElement('tr');
+    tr.appendChild(el('td', null, describeSession(meta) + (meta.docKey === docKey ? ' (session en cours)' : '')));
+    tr.appendChild(el('td', null, meta.sheetCount + ' feuille(s), ' + meta.rowCount + ' lignes' + (meta.bytes ? ', ' + humanSize(meta.bytes) : '')));
+    tr.appendChild(el('td', null, frDateTime(meta.savedAt)));
+    const act = document.createElement('td');
+    const restore = el('button', 'btn-quiet btn-icon', 'Restaurer');
+    restore.addEventListener('click', () => {
+      if (hasData() && !confirm('Restaurer cette session remplace les données affichées.\n\nL\'action reste annulable par Ctrl+Z. Continuer ?')) return;
+      snapshot();
+      $('sessionsDialog').close();
+      applySession(readSession(meta.docKey));
+    });
+    const drop = el('button', 'btn-danger btn-icon', 'Supprimer');
+    drop.addEventListener('click', () => {
+      if (!confirm('Supprimer définitivement la sauvegarde « ' + describeSession(meta) + ' » ?')) return;
+      dropSession(meta.docKey);
+      openSessions();
+      restoreUi();
+    });
+    act.appendChild(restore); act.appendChild(drop);
+    tr.appendChild(act);
+    body.appendChild(tr);
+  });
+  $('storageUsage').textContent = metas.length
+    ? 'Place occupée par les sauvegardes : environ ' + humanSize(bytes) + ' sur les 5 Mo environ qu\'autorise le navigateur.'
+    : '';
+  $('sessionsDialog').showModal();
+}
+
+/* =====================================================================
+   18. Câblage
+   ===================================================================== */
+$('saveBtn').addEventListener('click', saveRow);
+$('cancelBtn').addEventListener('click', closeRowDialog);
+$('closeRowBtn').addEventListener('click', closeRowDialog);
+$('closeRowX').addEventListener('click', closeRowDialog);
+$('rowDialog').addEventListener('close', resetForm);
+$('openAdd').addEventListener('click', () => openRowDialog('Ajouter une ligne dans « ' + currentSheet + ' »', true));
+
+$('openJournal').addEventListener('click', () => { renderJournal(); $('journalDialog').showModal(); });
+$('closeJournalBtn').addEventListener('click', () => $('journalDialog').close());
+$('closeJournalX').addEventListener('click', () => $('journalDialog').close());
+
+$('searchInput').addEventListener('input', () => { page = 1; render(); });
+$('pageSize').addEventListener('change', () => { page = 1; render(); });
+$('prevPage').addEventListener('click', () => { page--; render(); });
+$('nextPage').addEventListener('click', () => { page++; render(); });
+$('openImport').addEventListener('click', () => $('fileUpload').click());
+
+$('impReplace').addEventListener('click', () => applyImport('replace'));
+$('impMerge').addEventListener('click', () => applyImport('merge'));
+$('cancelImportBtn').addEventListener('click', () => { pendingImport = null; $('importDialog').close(); });
+$('closeImportX').addEventListener('click', () => { pendingImport = null; $('importDialog').close(); });
+
+$('openSessions').addEventListener('click', openSessions);
+$('closeSessionsBtn').addEventListener('click', () => $('sessionsDialog').close());
+$('closeSessionsX').addEventListener('click', () => $('sessionsDialog').close());
+$('otherSessionsBtn').addEventListener('click', openSessions);
+$('storageSessionsBtn').addEventListener('click', openSessions);
+$('storageExportBtn').addEventListener('click', openExportDialog);
+$('storageRetryBtn').addEventListener('click', saveLocal);
+$('noteCloseBtn').addEventListener('click', () => { $('noteBanner').style.display = 'none'; });
+
+function openExportDialog() {
+  if (!hasData()) { alert("Chargez un fichier ou créez une feuille avant d'exporter."); return; }
+  $('expCsvHint').textContent = 'Un fichier texte contenant la feuille « ' + currentSheet + ' » uniquement.';
+  $('exportNameHint').textContent = 'Les fichiers produits seront nommés « ' + exportBase() + '_' + stamp() +
+    ' » : le nom du document et l\'horodatage évitent les (1), (2) dans le dossier de téléchargement.';
+  $('exportDialog').showModal();
+}
+function runExport(fn) { $('exportDialog').close(); fn(); }
+
+$('openExport').addEventListener('click', openExportDialog);
+$('closeExportBtn').addEventListener('click', () => $('exportDialog').close());
+$('closeExportX').addEventListener('click', () => $('exportDialog').close());
+$('expXlsx').addEventListener('click', () => runExport(() => exportBook('xlsx')));
+$('expOds').addEventListener('click', () => runExport(() => exportBook('ods')));
+$('expCsv').addEventListener('click', () => runExport(exportCsvCurrent));
+$('expCsvAll').addEventListener('click', () => runExport(exportCsvAll));
+$('exportJournal').addEventListener('click', exportJournalCsv);
+$('clearJournal').addEventListener('click', () => {
+  if (confirm('Vider le journal des modifications ?')) { journal = []; renderJournal(); saveLocal(); }
+});
+$('undoBtn').addEventListener('click', undo);
+$('linkFileBtn').addEventListener('click', linkFile);
+$('locateFolderBtn').addEventListener('click', locateFolder);
+$('unlinkFileBtn').addEventListener('click', unlinkFile);
+
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) {
+    e.preventDefault(); undo();
+  }
+});
+
+/* L'écriture disque était différée de 1,5 s sans que la fermeture ne s'en
+   soucie : une saisie faite juste avant de fermer partait en silence. */
+window.addEventListener('beforeunload', e => {
+  if (dirtyLocal) { try { saveLocal(); } catch (err) { /* rien */ } }
+  const pending = dirtyLocal || dirtyFile || storageBlocked;
+  if (!hasData()) { releaseLocks(); return; }
+  if (pending || !fileHandle) {
+    e.preventDefault();
+    e.returnValue = '';
+    return;
+  }
+  releaseLocks();
+});
+window.addEventListener('pagehide', () => { if (dirtyLocal) saveLocal(); releaseLocks(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'hidden') return;
+  if (dirtyLocal) saveLocal();
+  if (dirtyFile) saveToFile();
+});
+
+/* =====================================================================
+   19. Démarrage
+   ===================================================================== */
+if (!('showSaveFilePicker' in window)) {
+  $('linkFileBtn').title = 'Disponible sur Chrome et Edge uniquement';
+}
+showLibBanner();
+if (!lsAvailable()) {
+  storageBlocked = true;
+  $('storageText').textContent = 'Le stockage du navigateur est inaccessible (navigation privée ou cookies bloqués) : ' +
+    'rien ne sera conservé à la fermeture de l\'onglet. Exportez vos données avant de fermer.';
+  $('storageBanner').style.display = 'flex';
+} else {
+  migrateLegacy();
+  restoreUi();
+}
+if (location.protocol === 'file:') {
+  log('struct', 'Page ouverte depuis le disque : selon le navigateur, les fichiers HTML locaux partagent le même stockage. ' +
+    'Servir la page depuis un petit serveur local isole les sauvegardes.');
+}
+claimDocument(fileLabel, true);   // onglet encore vide : rien à signaler
+refreshDocLabel();
+refreshLinkedStatus();
+renderJournal();
+</script>
+</body>
+</html>
