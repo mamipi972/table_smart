@@ -46,9 +46,9 @@ node outils/integrer-xlsx.js --lib ~/xlsx.full.min.js --sortie tableur-autonome.
 ```
 
 Le résultat s'ouvre seul, depuis une clé USB ou une pièce jointe, sans fichier
-voisin ni réseau. Contreparties : environ **1 Mo** (126 Ko pour la page, 860 Ko
-pour la librairie), et il faut refabriquer le fichier à chaque mise à jour de
-SheetJS. L'outil échappe les séquences `</script` et refuse d'écrire si la
+voisin ni réseau. Contreparties : environ **1 Mo** (126 Ko pour la page, 930 Ko
+pour la librairie en 0.20.3), et il faut refabriquer le fichier à chaque mise à
+jour de SheetJS. L'outil échappe les séquences `</script` et refuse d'écrire si la
 librairie contient une ligne débutant par `-->`, qui serait lue comme un
 commentaire une fois intégrée.
 
@@ -228,8 +228,8 @@ node outils/integrer-xlsx.js --lib ~/xlsx.full.min.js --sortie tableur-autonome.
 ```
 
 The result opens on its own — from a USB stick or an email attachment — with no
-neighbouring file and no network. The trade-off is about **1 MB** (126 KB page, 860 KB
-library) and a rebuild on every SheetJS update. The tool escapes `</script` sequences and
+neighbouring file and no network. The trade-off is about **1 MB** (126 KB page, 930 KB
+library at 0.20.3) and a rebuild on every SheetJS update. The tool escapes `</script` sequences and
 refuses to write if the library contains a line starting with `-->`, which would be read
 as a comment once inlined. The generated file passes the same test suite:
 `TABLEUR=tableur-autonome.html node tests/test.js`.
