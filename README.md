@@ -24,6 +24,13 @@ La librairie n'est plus chargée depuis un CDN en cas d'absence du fichier local
 dans le navigateur continuent de fonctionner ; les formats `.xlsx`, `.xls` et
 `.ods` sont désactivés et un bandeau rouge le dit.
 
+Prenez de préférence **0.20.2 ou plus récent** : les versions antérieures, 0.20.1
+comprise, sont visées par l'avis ReDoS [CVE-2024-22363](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9)
+— un fichier fabriqué pour l'occasion peut y faire tourner une expression régulière
+sans fin et figer l'onglet. La page a été vérifiée avec 0.20.1 et 0.18.5 :
+`XLSX_LIB=chemin/xlsx.full.min.js node tests/test.js` rejoue la suite avec la
+version de votre choix.
+
 Ouvrir la page depuis un petit serveur local (`npx http-server`) plutôt qu'en
 `file://` isole proprement le stockage du navigateur : en `file://`, selon le
 navigateur, tous les fichiers HTML locaux se partagent le même espace.
@@ -200,6 +207,12 @@ request, nothing leaves the machine. The interface itself is in French.
 The CDN fallback is gone (see [The CDN](#the-cdn)). Without the library, CSV import, data
 entry and browser autosave still work; `.xlsx`, `.xls` and `.ods` are disabled and a red
 banner says so.
+
+Prefer **0.20.2 or newer**: earlier releases, 0.20.1 included, are covered by the ReDoS
+advisory [CVE-2024-22363](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9) — a crafted
+file can send a regular expression spinning and freeze the tab. The page has been checked
+against 0.20.1 and 0.18.5: `XLSX_LIB=path/to/xlsx.full.min.js node tests/test.js` replays
+the suite with the version of your choice.
 
 Serving the page from a small local server (`npx http-server`) rather than opening it as
 `file://` properly isolates browser storage: under `file://`, depending on the browser,

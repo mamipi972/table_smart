@@ -30,7 +30,8 @@ function prepare() {
   const libVoisine = path.join(dir, 'xlsx.full.min.js');
   const integree = fs.readFileSync(page, 'utf8').includes('window.__xlsxInline = true');
   if (integree) { if (fs.existsSync(libVoisine)) fs.unlinkSync(libVoisine); }
-  else fs.copyFileSync(path.join(path.dirname(require.resolve('xlsx')), 'dist', 'xlsx.full.min.js'), libVoisine);
+  // XLSX_LIB=chemin/xlsx.full.min.js essaie la page avec une autre version de SheetJS
+  else fs.copyFileSync(process.env.XLSX_LIB || path.join(path.dirname(require.resolve('xlsx')), 'dist', 'xlsx.full.min.js'), libVoisine);
   execFileSync(process.execPath, [path.join(__dirname, 'mkdata.js'), dir], { stdio: 'inherit' });
   console.log('page essayee : ' + page + (integree ? ' (librairie integree)' : ' (librairie voisine)'));
 }
