@@ -16,7 +16,7 @@ node tests/test.js
 à côté de `tableur.html`.
 
 `XLSX_LIB=chemin/xlsx.full.min.js node tests/test.js` rejoue la suite avec une autre
-version de SheetJS (0.20.1 et 0.18.5 vérifiées).
+version de SheetJS (0.20.3, 0.20.1 et 0.18.5 vérifiées).
 
 `TABLEUR=chemin/page.html node tests/test.js` fait passer la même suite à une autre
 page — par exemple `tableur-autonome.html`, fabriqué par `outils/integrer-xlsx.js` :

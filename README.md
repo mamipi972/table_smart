@@ -27,7 +27,7 @@ dans le navigateur continuent de fonctionner ; les formats `.xlsx`, `.xls` et
 Prenez de préférence **0.20.2 ou plus récent** : les versions antérieures, 0.20.1
 comprise, sont visées par l'avis ReDoS [CVE-2024-22363](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9)
 — un fichier fabriqué pour l'occasion peut y faire tourner une expression régulière
-sans fin et figer l'onglet. La page a été vérifiée avec 0.20.1 et 0.18.5 :
+sans fin et figer l'onglet. La page a été vérifiée avec 0.20.3, 0.20.1 et 0.18.5 :
 `XLSX_LIB=chemin/xlsx.full.min.js node tests/test.js` rejoue la suite avec la
 version de votre choix.
 
@@ -211,7 +211,7 @@ banner says so.
 Prefer **0.20.2 or newer**: earlier releases, 0.20.1 included, are covered by the ReDoS
 advisory [CVE-2024-22363](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9) — a crafted
 file can send a regular expression spinning and freeze the tab. The page has been checked
-against 0.20.1 and 0.18.5: `XLSX_LIB=path/to/xlsx.full.min.js node tests/test.js` replays
+against 0.20.3, 0.20.1 and 0.18.5: `XLSX_LIB=path/to/xlsx.full.min.js node tests/test.js` replays
 the suite with the version of your choice.
 
 Serving the page from a small local server (`npx http-server`) rather than opening it as

@@ -60,8 +60,9 @@ const fermetures = (code.match(/<\/script/gi) || []).length;
 if (fermetures) code = code.replace(/<\/script/gi, '<\\/script');
 
 /* « <!-- » et « --> » ouvrent un commentaire dans un script classique. Dans
-   SheetJS ils n'apparaissent qu'au sein d'expressions régulières (nettoyage de
-   fragments HTML), où ils sont inoffensifs — mais on le vérifie. */
+   SheetJS ils n'apparaissent qu'au milieu d'une ligne, en chaîne ou en
+   expression régulière (nettoyage de fragments HTML), donc inertes — mais
+   « --> » en début de ligne serait bien lu comme un commentaire : on vérifie. */
 const commentaires = (code.match(/<!--/g) || []).length;
 const suspects = code.split('\n').filter(l => /^\s*-->/.test(l)).length;
 if (suspects) {
@@ -92,5 +93,5 @@ console.log('  page seule      : ' + ko(Buffer.byteLength(html)));
 console.log('  librairie       : ' + ko(Buffer.byteLength(code)));
 console.log('  page autonome   : ' + ko(Buffer.byteLength(resultat)));
 if (fermetures) console.log('  ' + fermetures + ' occurrence(s) de « </script » échappée(s)');
-if (commentaires) console.log('  ' + commentaires + ' occurrence(s) de « <!-- » laissée(s) telles quelles (dans des expressions régulières)');
+if (commentaires) console.log('  ' + commentaires + ' occurrence(s) de « <!-- » laissée(s) telles quelles (en milieu de ligne, donc inertes)');
 console.log('\nVérifiez la page une fois dans le navigateur : import, export, puis rechargement.');
