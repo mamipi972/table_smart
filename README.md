@@ -66,51 +66,75 @@ fichiers HTML locaux se partagent le même espace.
 
 ### Fabriquer la version autonome
 
-Le dépôt livre déjà `tableur-autonome.html`, et la page sait le fabriquer elle-même
-(voir ci-dessus). Ces outils ne servent donc qu'à le **régénérer en lot** : nouvelle
-version de SheetJS, ou modification de `tableur.html`.
+> **Rien ici n'est nécessaire pour se servir du tableur.** Si vous voulez juste
+> l'utiliser, téléchargez `tableur-autonome.html` et passez à la suite. Cette
+> section s'adresse à qui modifie l'application ou change de version de SheetJS.
 
-Depuis le dossier du projet, la librairie est recopiée **dans** la page. Deux
-outils équivalents, selon ce qui est installé :
+**De quoi parle-t-on ?** `tableur-autonome.html` n'est pas écrit à la main : c'est
+`tableur.html` dans lequel on a recopié la librairie, d'un seul tenant. Ce collage,
+c'est ce qu'on appelle « fabriquer » le fichier. Le dépôt en livre déjà un tout prêt ;
+les outils ci-dessous ne servent qu'à en refaire un.
+
+**Quand faut-il le refaire ?** Deux cas, et deux seulement :
+
+1. une nouvelle version de SheetJS est sortie et vous voulez l'embarquer ;
+2. vous avez modifié `tableur.html` — sinon le fichier livré resterait sur l'ancienne version.
+
+**Trois façons de le faire, de la plus simple à la plus technique.**
+
+*Depuis la page elle-même, sans rien installer.* Ouvrez `tableur.html`, cliquez sur
+« Choisir le fichier xlsx.full.min.js… » dans le bandeau rouge, puis sur « Enregistrer la
+page tout-en-un ». Le fichier arrive dans vos téléchargements. C'est la méthode à retenir
+si les deux suivantes vous parlent peu.
+
+*Avec Node.js.* [Node.js](https://nodejs.org) est un programme qui exécute du JavaScript
+hors du navigateur (`winget install OpenJS.NodeJS.LTS` sous Windows, puis rouvrir le
+terminal). Ouvrez un terminal **dans le dossier du projet**, placez-y `xlsx.full.min.js`,
+et tapez :
 
 ```sh
-# avec Node.js (Windows, macOS, Linux)
-node outils/integrer-xlsx.js                       # attend ./xlsx.full.min.js
+node outils/integrer-xlsx.js
+```
+
+Pour désigner une librairie rangée ailleurs, ou choisir le nom du fichier produit :
+
+```sh
 node outils/integrer-xlsx.js --lib ~/xlsx.full.min.js --sortie tableur-autonome.html
 ```
 
+*Avec PowerShell, sous Windows, sans rien installer.* Toujours depuis le dossier du projet :
+
 ```powershell
-# sans Node.js, avec PowerShell seul (Windows)
 .\outils\integrer-xlsx.ps1
+```
+
+```powershell
 .\outils\integrer-xlsx.ps1 -Lib "$HOME\Downloads\xlsx.full.min.js" -Sortie tableur-autonome.html
 ```
 
-Le script `.js` demande [Node.js](https://nodejs.org) (`winget install OpenJS.NodeJS.LTS`
-sous Windows, puis rouvrir le terminal). Le `.ps1` n'a besoin de rien d'autre que
-Windows ; si l'exécution est refusée, autorisez-la pour la session en cours avec
-`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`. Les deux produisent
-le même fichier — le `.ps1` n'a pas pu être exécuté lors de son écriture, faute de
-PowerShell sur la machine de développement : signalez tout écart.
+Si Windows refuse d'exécuter le script, autorisez-le pour la fenêtre en cours :
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`. Les deux scripts produisent
+le même fichier ; le `.ps1` n'a pas pu être exécuté lors de son écriture, faute de
+PowerShell sur la machine de développement, donc signalez tout écart.
 
-Le résultat s'ouvre seul, depuis une clé USB ou une pièce jointe, sans fichier
-voisin ni réseau. Contreparties : environ **1 Mo** (126 Ko pour la page, 930 Ko
-pour la librairie en 0.20.3), et il faut refabriquer le fichier à chaque mise à
-jour de SheetJS. L'outil échappe les séquences `</script` et refuse d'écrire si la
-librairie contient une ligne débutant par `-->`, qui serait lue comme un
-commentaire une fois intégrée.
+**Ce que font ces outils, en clair.** Ils recopient la librairie dans la page en évitant
+deux pièges : une suite `</script` dans le code refermerait la balise trop tôt et couperait
+la page en deux, donc elle est neutralisée ; une ligne débutant par `-->` serait prise pour
+la fin d'un commentaire, donc l'outil refuse plutôt que de produire un fichier cassé.
 
-Le fichier produit passe la même suite de tests :
+**Ce que ça coûte.** Environ 1 Mo au total : 132 Ko pour la page, 930 Ko pour la librairie
+en 0.20.3.
+
+**Deux précautions pour qui reprend le projet.** Le fichier fabriqué est enregistré dans le
+dépôt, ce qui ne se fait pas d'habitude pour 1 Mo produit par un outil : c'est le prix à
+payer pour qu'un débutant n'ait qu'un fichier à télécharger. Et comme il peut rester en
+arrière quand `tableur.html` change, `tests/test-sans-librairie.js` compare les deux et
+signale l'écart. Après toute modification de `tableur.html`, relancez donc
+`node outils/integrer-xlsx.js`. Le fichier produit se contrôle avec la suite habituelle :
 
 ```sh
 TABLEUR=tableur-autonome.html node tests/test.js
 ```
-
-`tableur-autonome.html` est versionné dans le dépôt, contrairement à l'usage pour un
-fichier fabriqué de 1 Mo : c'est le prix à payer pour qu'un débutant n'ait qu'un fichier à
-télécharger. Pour éviter qu'il ne prenne du retard sur `tableur.html` sans que personne ne
-le voie, `tests/test-sans-librairie.js` compare les deux et échoue si la page livrée n'est
-plus à jour — après toute modification de `tableur.html`, relancez
-`node outils/integrer-xlsx.js`.
 
 ## Ce qui a été corrigé
 
@@ -309,95 +333,54 @@ every local HTML file shares the same storage area.
 
 #### Single-file build
 
-The repository already ships `tableur-autonome.html`, and the page can build one itself
-(see above). These tools only **regenerate it in bulk**: a new SheetJS release, or a change
-to `tableur.html`.
+> **None of this is needed to use the spreadsheet.** To simply use it, download
+> `tableur-autonome.html` and skip ahead. This part is for whoever changes the
+> application or the SheetJS version.
 
-From the project folder, the library is copied **into** the page. Two equivalent tools,
-depending on what is installed:
+`tableur-autonome.html` is not hand-written: it is `tableur.html` with the library copied
+inside it. The repository ships one ready to use; the tools below only rebuild it — after
+a new SheetJS release, or after a change to `tableur.html` (otherwise the shipped file
+stays on the old version).
+
+*From the page itself, nothing to install.* Open `tableur.html`, click “Choisir le fichier
+xlsx.full.min.js…” in the red banner, then “Enregistrer la page tout-en-un”. The file lands
+in your downloads.
+
+*With [Node.js](https://nodejs.org).* In a terminal, from the project folder, with
+`xlsx.full.min.js` sitting there:
 
 ```sh
-# with Node.js (Windows, macOS, Linux)
-node outils/integrer-xlsx.js                       # expects ./xlsx.full.min.js
+node outils/integrer-xlsx.js
 node outils/integrer-xlsx.js --lib ~/xlsx.full.min.js --sortie tableur-autonome.html
 ```
 
+*With PowerShell on Windows, nothing to install.* From the project folder:
+
 ```powershell
-# without Node.js, PowerShell only (Windows)
 .\outils\integrer-xlsx.ps1
 .\outils\integrer-xlsx.ps1 -Lib "$HOME\Downloads\xlsx.full.min.js" -Sortie tableur-autonome.html
 ```
 
-`tableur-autonome.html` is tracked in the repository, against the usual rule for a 1 MB
-build product: that is the price of a beginner having a single file to download.
-`tests/test-sans-librairie.js` compares it against `tableur.html` and fails when the
-shipped page falls behind — after any change to `tableur.html`, run
-`node outils/integrer-xlsx.js` again.
+If Windows blocks the script, allow it for the current window with
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`. Both scripts produce the same
+file; the `.ps1` could not be executed as it was written, for lack of PowerShell on the
+development machine, so please report any discrepancy.
 
-The `.js` script needs [Node.js](https://nodejs.org); the `.ps1` needs nothing but
-Windows (if execution is blocked, allow it for the current session with
-`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`). Both produce the same
-file — the `.ps1` could not be executed as it was written, for lack of PowerShell on
-the development machine: please report any discrepancy.
+The tools dodge two traps while copying: a `</script` sequence inside the code would close
+the tag too early and cut the page in half, so it is escaped; a line starting with `-->`
+would be read as the end of a comment, so the tool refuses rather than write a broken file.
+The result weighs about 1 MB (132 KB page, 930 KB library at 0.20.3).
 
-The result opens on its own — from a USB stick or an email attachment — with no
-neighbouring file and no network. The trade-off is about **1 MB** (126 KB page, 930 KB
-library at 0.20.3) and a rebuild on every SheetJS update. The tool escapes `</script` sequences and
-refuses to write if the library contains a line starting with `-->`, which would be read
-as a comment once inlined. The generated file passes the same test suite:
-`TABLEUR=tableur-autonome.html node tests/test.js`.
+Two notes for whoever picks the project up. The built file is tracked in the repository,
+which is not how a 1 MB build product is usually handled: that is the price of a beginner
+having a single file to download. And since it can fall behind `tableur.html`,
+`tests/test-sans-librairie.js` compares the two and reports the gap — so run
+`node outils/integrer-xlsx.js` again after any change to `tableur.html`. The result is
+checked with the usual suite:
 
-### What was fixed
-
-**Data loss on import — the main one.** Import now asks before touching an open session and
-offers *replace* or *add the sheets alongside* (merge, nothing overwritten). The undo stack
-is no longer cleared: **Ctrl+Z brings the previous session back**, document label included.
-The previous document's saved copy is no longer overwritten either.
-
-**Local save.** One entry per document (`tableur.session.v4::<name>|<size>|<date>`) instead
-of a single key, so working on file B no longer erases file A's session; the old
-`tableur.session.v3` key is migrated on first start. A *saved sessions* list shows each
-backup with the **size and date of the source file**, which finally tells two `clients.xlsx`
-from different folders apart; each row restores or deletes on its own. **Concurrent tabs**
-are detected through a timestamped lock plus a `BroadcastChannel`: the second tab suspends
-its autosave, says so, and offers to take over — same warning when two tabs link the same
-file on disk. When the **quota is reached**, a permanent red banner, a red dot, a
-`NON ENREGISTRÉ` status and an explicit alert replace the old line tucked into a corner of
-the status bar, after one automatic retry without the change log.
-
-**Closing the tab.** The warning now covers **pending writes** (500 ms locally, 1.2 s to
-disk), including when a file is linked — precisely the case that used to lose the last
-entry silently. `pagehide` and going to the background force an immediate local save.
-
-**Numeric conversion.** Columns with a **leading zero** (postcode `01234`, phone number
-`0612345678`) and those beyond **fifteen significant digits** stay text, and the import
-reports it column by column; the file is read twice (native values plus displayed text) to
-recover the `01234` of a formatted numeric cell. Typing a leading-zero value into a number
-column offers to switch the column to text instead of damaging the value, and turning a
-column into numbers warns how many values would be damaged.
-
-**Details.** Off-schema columns are **re-attached** (import, restore, export) instead of
-being dropped at export time. Sheet names are truncated to 31 characters **and then made
-unique** (case-insensitive, like Excel), so near-identical names no longer break the export.
-Latin-1 CSV files are **detected** (strict UTF-8, otherwise Windows-1252) and the encoding
-used is announced; the separator (`;` `,` tab `|`) is guessed. **CSV injection**: cells
-starting with `=`, `+`, `-` or `@` are prefixed with an apostrophe on export (a checkbox in
-the export dialog turns it off), headers included. A `__proto__`, `constructor` or
-`prototype` column is renamed on import (`proto_`, …) so its values no longer vanish, and no
-cell read goes through the prototype chain. Exported files carry the document name and a
-timestamp (`clients_2026-09-14_1530.xlsx`), and CSVs of one batch are numbered, so
-`Ventes/2025` and `Ventes_2025` no longer produce the same file. The linked file shows its
-size, and *Situer le dossier…* resolves the **full path** once you point at the parent
-folder — the browser never gives it away on its own.
-
-#### The CDN
-
-The `cdn.sheetjs.com` fallback was **removed**. Without an `integrity` attribute, a
-compromised CDN would get access to every piece of data on the page and, in linked mode,
-write access to the file on disk. The header of `tableur.html` documents how to restore the
-fallback with an SRI hash. On top of that, the library is checked at runtime
-(`xlsxReady()`), which catches a local file that is present but corrupt — something
-`onerror` let through — and **export checks the library just like import does**.
+```sh
+TABLEUR=tableur-autonome.html node tests/test.js
+```
 
 ### Suggested computed columns (the “+ Colonne” button)
 
