@@ -16,53 +16,59 @@ Le texte en exergue ci-dessus est celui du champ « About » du dépôt. Sujets 
 
 ## Mise en route
 
-**La page existe sous deux formes.** C'est la confusion la plus fréquente, alors
-autant la lever tout de suite :
+**Un seul fichier, rien à installer.** Ouvrez [`tableur-autonome.html`](tableur-autonome.html)
+puis, en haut à droite de la page GitHub, le bouton de téléchargement (⤓ *Download raw
+file*). Double-cliquez sur le fichier obtenu : il s'ouvre dans votre navigateur et tout
+fonctionne — Excel compris. Pas de terminal, pas de librairie à poser à côté, aucune
+connexion.
+
+C'est la voie recommandée. Le reste de cette section ne sert que si vous préférez
+travailler avec la page seule.
+
+<details>
+<summary>Les deux formes de la page (pour les curieux)</summary>
 
 | Fichier | Librairie SheetJS | Poids | Pour l'ouvrir |
 |---|---|---|---|
 | `tableur-autonome.html` | **dedans** | ~1 Mo | double-clic, rien d'autre |
-| `tableur.html` (ce dépôt) | **à côté** | 126 Ko | avec `xlsx.full.min.js` dans le même dossier |
+| `tableur.html` | **à côté** | 132 Ko | avec `xlsx.full.min.js` dans le même dossier |
 
-Pour savoir laquelle vous avez en main, cherchez `__xlsxInline = true` dans le
-fichier HTML : présent, la librairie est dedans. Sinon, ouvrez la page — un
-bandeau rouge apparaît quand le fichier voisin manque.
+`tableur-autonome.html` est fabriqué à partir de `tableur.html` : même application, la
+librairie en plus. Pour savoir laquelle vous avez en main, cherchez `__xlsxInline = true`
+dans le fichier HTML.
 
-### La version autonome
+</details>
 
-Double-cliquez sur `tableur-autonome.html`. C'est tout.
+### Si vous ouvrez `tableur.html` sans la librairie
 
-Ce fichier n'est pas versionné dans le dépôt : il pèse 1 Mo, il se régénère en une
-commande (voir [Fabriquer la version autonome](#fabriquer-la-version-autonome)), et
-versionner une librairie minifiée rendrait l'historique illisible — chaque mise à
-jour de SheetJS ajouterait 1 Mo de diff incompréhensible. Le dépôt garde donc la
-source ; l'autonome est un produit fini qu'on fabrique.
+La page ne reste pas muette : un bandeau rouge apparaît avec un bouton
+**« Choisir le fichier xlsx.full.min.js… »**. Désignez le fichier où qu'il soit sur votre
+disque, il est chargé sur-le-champ — sans installation, sans rechargement. Le bouton
+**« Où le trouver ? »** donne l'adresse de téléchargement.
 
-### La version du dépôt
+La page propose ensuite d'**enregistrer la version tout-en-un** : un clic, et vous obtenez
+votre propre `tableur-autonome.html`, librairie comprise. Vous n'aurez plus jamais à
+recommencer. Cette fabrication se fait entièrement dans le navigateur, sans outil.
 
-1. Placez `xlsx.full.min.js` (SheetJS 0.20.3) **à côté** de `tableur.html`.
-2. Ouvrez `tableur.html`.
+Sans la librairie, l'import CSV, la saisie et la sauvegarde dans le navigateur continuent
+de fonctionner ; seuls `.xlsx`, `.xls` et `.ods` attendent.
 
-La librairie n'est plus chargée depuis un CDN en cas d'absence du fichier local
-(voir « Le CDN » plus bas). Sans elle, l'import CSV, la saisie et la sauvegarde
-dans le navigateur continuent de fonctionner ; les formats `.xlsx`, `.xls` et
-`.ods` sont désactivés et un bandeau rouge le dit.
-
-Prenez de préférence **0.20.2 ou plus récent** : les versions antérieures, 0.20.1
+Prenez de préférence **SheetJS 0.20.2 ou plus récent** : les versions antérieures, 0.20.1
 comprise, sont visées par l'avis ReDoS [CVE-2024-22363](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9)
-— un fichier fabriqué pour l'occasion peut y faire tourner une expression régulière
-sans fin et figer l'onglet. La page a été vérifiée avec 0.20.3, 0.20.1 et 0.18.5 :
-`XLSX_LIB=chemin/xlsx.full.min.js node tests/test.js` rejoue la suite avec la
-version de votre choix.
+— un fichier fabriqué pour l'occasion peut y faire tourner une expression régulière sans
+fin et figer l'onglet. La page a été vérifiée avec 0.20.3, 0.20.1 et 0.18.5 ;
+`tableur-autonome.html` embarque la **0.20.3**, redistribuée sous licence Apache 2.0 avec
+son en-tête de copyright ([SheetJS](https://sheetjs.com)).
 
-Ouvrir la page depuis un petit serveur local (`npx http-server`) plutôt qu'en
-`file://` isole proprement le stockage du navigateur : en `file://`, selon le
-navigateur, tous les fichiers HTML locaux se partagent le même espace.
+Ouvrir la page depuis un petit serveur local (`npx http-server`) plutôt qu'en `file://`
+isole proprement le stockage du navigateur : en `file://`, selon le navigateur, tous les
+fichiers HTML locaux se partagent le même espace.
 
 ### Fabriquer la version autonome
 
-Étape utile seulement pour **produire** `tableur-autonome.html` — mettre à jour
-SheetJS, par exemple. Si vous avez déjà ce fichier, il n'y a rien à lancer.
+Le dépôt livre déjà `tableur-autonome.html`, et la page sait le fabriquer elle-même
+(voir ci-dessus). Ces outils ne servent donc qu'à le **régénérer en lot** : nouvelle
+version de SheetJS, ou modification de `tableur.html`.
 
 Depuis le dossier du projet, la librairie est recopiée **dans** la page. Deux
 outils équivalents, selon ce qui est installé :
@@ -98,6 +104,13 @@ Le fichier produit passe la même suite de tests :
 ```sh
 TABLEUR=tableur-autonome.html node tests/test.js
 ```
+
+`tableur-autonome.html` est versionné dans le dépôt, contrairement à l'usage pour un
+fichier fabriqué de 1 Mo : c'est le prix à payer pour qu'un débutant n'ait qu'un fichier à
+télécharger. Pour éviter qu'il ne prenne du retard sur `tableur.html` sans que personne ne
+le voie, `tests/test-sans-librairie.js` compare les deux et échoue si la page livrée n'est
+plus à jour — après toute modification de `tableur.html`, relancez
+`node outils/integrer-xlsx.js`.
 
 ## Ce qui a été corrigé
 
@@ -219,6 +232,11 @@ Même principe pour les feuilles, dès que **deux lignes partagent une même val
 onglets, quota, encodage, injection CSV, noms de feuille, colonnes calculées et
 regroupements proposés — 53 vérifications.
 
+`tests/test-sans-librairie.js` rejoue le parcours du débutant : page ouverte sans la
+librairie, fichier désigné à la main, page tout-en-un enregistrée depuis le navigateur,
+puis rouverte seule pour vérifier qu'elle se suffit — 19 vérifications, dont le contrôle
+que la page livrée n'est pas en retard sur la source.
+
 ```sh
 npm install playwright xlsx     # xlsx sert à fabriquer les fichiers d'essai
 node tests/test.js
@@ -242,41 +260,48 @@ request, nothing leaves the machine. The interface itself is in French.
 
 ### Getting started
 
-**The page comes in two shapes** — this is the usual point of confusion, so here it is
-up front:
+**One file, nothing to install.** Open [`tableur-autonome.html`](tableur-autonome.html)
+and use the download button (⤓ *Download raw file*) at the top right of the GitHub page.
+Double-click the file you get: it opens in your browser and everything works, Excel
+included. No terminal, no library to drop next to it, no connection.
+
+That is the recommended route. The rest of this section only matters if you would rather
+work with the page on its own.
+
+<details>
+<summary>The two shapes of the page (for the curious)</summary>
 
 | File | SheetJS library | Size | How to open it |
 |---|---|---|---|
 | `tableur-autonome.html` | **inside** | ~1 MB | double-click, nothing else |
-| `tableur.html` (this repo) | **alongside** | 126 KB | with `xlsx.full.min.js` in the same folder |
+| `tableur.html` | **alongside** | 132 KB | with `xlsx.full.min.js` in the same folder |
 
-To tell which one you have, search the HTML for `__xlsxInline = true`: if it is there,
-the library is inside. Otherwise open the page — a red banner shows up when the
-neighbouring file is missing.
+`tableur-autonome.html` is built from `tableur.html`: same application, plus the library.
+To tell which one you have, search the HTML for `__xlsxInline = true`.
 
-#### The standalone file
+</details>
 
-Double-click `tableur-autonome.html`. That is all.
+#### If you open `tableur.html` without the library
 
-It is not tracked in the repository: it weighs 1 MB, it is rebuilt with one command (see
-[Single-file build](#single-file-build)), and versioning a minified library would wreck
-the history — every SheetJS update would add a megabyte of unreadable diff. The
-repository keeps the source; the standalone file is a build product.
+The page does not stay silent: a red banner appears with a **“Choisir le fichier
+xlsx.full.min.js…”** button. Point it at the file wherever it sits on your disk and it is
+loaded on the spot — no install, no reload. The **“Où le trouver ?”** button gives the
+download address.
 
-#### The repository version
+The page then offers to **save the all-in-one version**: one click and you get your own
+`tableur-autonome.html`, library included, never to repeat the exercise. That build runs
+entirely in the browser, with no tooling.
 
-1. Put `xlsx.full.min.js` (SheetJS 0.20.3) **next to** `tableur.html`.
-2. Open `tableur.html`.
+Without the library, CSV import, data entry and browser autosave still work; only `.xlsx`,
+`.xls` and `.ods` wait.
 
-The CDN fallback is gone (see [The CDN](#the-cdn)). Without the library, CSV import, data
-entry and browser autosave still work; `.xlsx`, `.xls` and `.ods` are disabled and a red
-banner says so.
-
-Prefer **0.20.2 or newer**: earlier releases, 0.20.1 included, are covered by the ReDoS
-advisory [CVE-2024-22363](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9) — a crafted
-file can send a regular expression spinning and freeze the tab. The page has been checked
-against 0.20.3, 0.20.1 and 0.18.5: `XLSX_LIB=path/to/xlsx.full.min.js node tests/test.js` replays
-the suite with the version of your choice.
+Prefer **SheetJS 0.20.2 or newer**: earlier releases, 0.20.1 included, are covered by the
+ReDoS advisory [CVE-2024-22363](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9) — a
+crafted file can send a regular expression spinning and freeze the tab. The page has been
+checked against 0.20.3, 0.20.1 and 0.18.5; `tableur-autonome.html` bundles **0.20.3**,
+redistributed under the Apache 2.0 licence with its copyright header
+([SheetJS](https://sheetjs.com)). `XLSX_LIB=path/to/xlsx.full.min.js node tests/test.js`
+replays the suite with the version of your choice.
 
 Serving the page from a small local server (`npx http-server`) rather than opening it as
 `file://` properly isolates browser storage: under `file://`, depending on the browser,
@@ -284,8 +309,9 @@ every local HTML file shares the same storage area.
 
 #### Single-file build
 
-Only needed to **produce** `tableur-autonome.html` — to update SheetJS, for instance.
-If you already have that file, there is nothing to run.
+The repository already ships `tableur-autonome.html`, and the page can build one itself
+(see above). These tools only **regenerate it in bulk**: a new SheetJS release, or a change
+to `tableur.html`.
 
 From the project folder, the library is copied **into** the page. Two equivalent tools,
 depending on what is installed:
@@ -301,6 +327,12 @@ node outils/integrer-xlsx.js --lib ~/xlsx.full.min.js --sortie tableur-autonome.
 .\outils\integrer-xlsx.ps1
 .\outils\integrer-xlsx.ps1 -Lib "$HOME\Downloads\xlsx.full.min.js" -Sortie tableur-autonome.html
 ```
+
+`tableur-autonome.html` is tracked in the repository, against the usual rule for a 1 MB
+build product: that is the price of a beginner having a single file to download.
+`tests/test-sans-librairie.js` compares it against `tableur.html` and fails when the
+shipped page falls behind — after any change to `tableur.html`, run
+`node outils/integrer-xlsx.js` again.
 
 The `.js` script needs [Node.js](https://nodejs.org); the `.ps1` needs nothing but
 Windows (if execution is blocked, allow it for the current session with
@@ -414,5 +446,10 @@ npm install playwright xlsx     # xlsx only builds the test fixtures
 node tests/test.js
 ```
 
-The script builds its own fixtures, serves the page on a local port, and exits non-zero on
+`tests/test-sans-librairie.js` replays the beginner's route: page opened without the
+library, file picked by hand, all-in-one page saved from the browser, then reopened on its
+own to prove it stands alone — 19 checks, including a guard against the shipped page
+falling behind the source.
+
+Both scripts build their own fixtures, serve the page on a local port, and exit non-zero on
 the first failure.

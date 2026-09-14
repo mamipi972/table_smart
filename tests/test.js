@@ -28,7 +28,8 @@ function prepare() {
   fs.mkdirSync(dir, { recursive: true });
   fs.copyFileSync(page, path.join(dir, 'index.html'));
   const libVoisine = path.join(dir, 'xlsx.full.min.js');
-  const integree = fs.readFileSync(page, 'utf8').includes('window.__xlsxInline = true');
+  // la page source charge la librairie par une balise src ; la page fabriquee non
+  const integree = !/src="xlsx\.full\.min\.js"/.test(fs.readFileSync(page, 'utf8'));
   if (integree) { if (fs.existsSync(libVoisine)) fs.unlinkSync(libVoisine); }
   // XLSX_LIB=chemin/xlsx.full.min.js essaie la page avec une autre version de SheetJS
   else fs.copyFileSync(process.env.XLSX_LIB || path.join(path.dirname(require.resolve('xlsx')), 'dist', 'xlsx.full.min.js'), libVoisine);

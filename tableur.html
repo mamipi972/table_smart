@@ -228,6 +228,15 @@
       <!-- librairie absente ou incomplète -->
       <div class="banner alert" id="libBanner">
         <span class="banner-text" id="libText"></span>
+        <button class="btn-primary" id="pickLibBtn">Choisir le fichier xlsx.full.min.js…</button>
+        <button class="btn-quiet" id="libHelpBtn">Où le trouver ?</button>
+        <input type="file" id="libUpload" accept=".js,text/javascript" hidden>
+      </div>
+
+      <div class="banner info" id="libOkBanner">
+        <span class="banner-text" id="libOkText"></span>
+        <button class="btn-primary" id="saveStandaloneBtn">Enregistrer la page tout-en-un</button>
+        <button class="btn-quiet" id="libOkCloseBtn">Plus tard</button>
       </div>
 
       <!-- quota localStorage atteint -->
@@ -565,6 +574,11 @@ const FR_RE  = /^\d{1,2}\/\d{1,2}\/\d{4}$/;
 const NUM_RE = /^-?\d+(?:[.,]\d+)?$/;
 const NUM_SPACED_RE = /^-?\d{1,3}(?:[ \u00A0\u202F]\d{3})+(?:[.,]\d+)?$/;
 
+/* Copie du document telle qu'elle vient du fichier, prise avant toute
+   modification : elle sert à fabriquer la page tout-en-un sans outil ni
+   terminal. Inutile — et coûteux — quand la librairie est déjà intégrée. */
+const PAGE_SOURCE = window.__xlsxInline ? '' : ('<!DOCTYPE html>\n' + document.documentElement.outerHTML);
+
 /* =====================================================================
    2. Utilitaires
    ===================================================================== */
@@ -666,20 +680,89 @@ function libMessage() {
 function libRemedy() {
   return window.__xlsxInline
     ? "Récupérez une copie complète de cette page."
-    : "Placez xlsx.full.min.js (SheetJS 0.20.3) dans le même dossier que cette page, puis rechargez.";
+    : "Cliquez sur « Choisir le fichier xlsx.full.min.js… » dans le bandeau rouge, en haut de la page : " +
+      "la librairie est chargée aussitôt, sans rien installer.";
 }
 function ensureXlsx(what) {
   if (xlsxReady()) return true;
   showLibBanner();
-  alert(libMessage() + "\n\n" + (what || 'Cette action') + " nécessite cette librairie. " + libRemedy() + "\n\n" +
+  alert(libMessage() + "\n\n" + (what || 'Cette action') + " nécessite cette librairie.\n\n" + libRemedy() + "\n\n" +
     "L'import de fichiers CSV et la sauvegarde dans le navigateur restent disponibles sans elle.");
   return false;
 }
 function showLibBanner() {
   if (xlsxReady()) { $('libBanner').style.display = 'none'; return; }
   $('libText').textContent = libMessage() +
-    " Les formats .xlsx, .xls et .ods sont indisponibles (import comme export) ; le CSV reste utilisable.";
+    " Les formats .xlsx, .xls et .ods sont indisponibles (import comme export) ; le CSV reste utilisable. " +
+    "Si vous avez le fichier sur votre disque, indiquez-le ci-contre : aucune installation n'est nécessaire.";
   $('libBanner').style.display = 'flex';
+  $('pickLibBtn').style.display = window.__xlsxInline ? 'none' : 'inline-block';
+  $('libHelpBtn').style.display = window.__xlsxInline ? 'none' : 'inline-block';
+}
+
+/* --- chargement de la librairie choisie à la main, sans terminal ------- */
+let libSource = '';          // texte de la librairie, pour fabriquer la page tout-en-un
+
+function runLibrary(code) {
+  const tag = document.createElement('script');
+  tag.textContent = code;    // exécution directe : pas d'URL, donc valable même en file://
+  document.head.appendChild(tag);
+  return xlsxReady();
+}
+
+function adoptLibrary(code, name) {
+  if (!/make_xlsx_lib|XLSX/.test(code.slice(0, 4000)) && !/XLSX/.test(code)) {
+    alert('Ce fichier ne ressemble pas à SheetJS.\n\nLe fichier attendu s\'appelle xlsx.full.min.js et pèse environ 1 Mo.');
+    return false;
+  }
+  let ok = false;
+  try { ok = runLibrary(code); } catch (e) { ok = false; }
+  if (!ok) {
+    alert('Le fichier a été lu, mais la librairie ne s\'est pas initialisée.\n\n' +
+      'Il est probablement incomplet : téléchargez-le de nouveau.');
+    return false;
+  }
+  libSource = code;
+  window.__xlsxLoadError = false;
+  $('libBanner').style.display = 'none';
+  log('struct', 'Librairie SheetJS ' + (XLSX.version || '') + ' chargée depuis « ' + name + ' »');
+  if (PAGE_SOURCE) {
+    $('libOkText').textContent = 'Librairie SheetJS ' + (XLSX.version || '') + ' chargée : les formats Excel sont disponibles. ' +
+      'Pour ne plus jamais avoir à refaire cette manipulation, enregistrez la page tout-en-un — un seul fichier, ' +
+      'librairie comprise, qu\'il suffira d\'ouvrir.';
+    $('libOkBanner').style.display = 'flex';
+  }
+  return true;
+}
+
+/* Fabrique la page tout-en-un depuis le navigateur : même travail que
+   outils/integrer-xlsx.js, sans Node ni ligne de commande. */
+function buildStandalone(code) {
+  const DEBUT = '<!-- DEBUT chargement de la librairie -->';
+  const FIN = '<!-- FIN chargement de la librairie -->';
+  const a = PAGE_SOURCE.indexOf(DEBUT), b = PAGE_SOURCE.indexOf(FIN);
+  if (a < 0 || b < 0 || b < a) return null;
+  const safe = code.replace(/<\/script/gi, '<\\/script');
+  if (/(^|\n)\s*-->/.test(safe)) return null;
+  const head = DEBUT + '\n<script>\n' +
+    '  /* Librairie SheetJS ' + (XLSX.version || '') + ' intégrée le ' + new Date().toISOString().slice(0, 10) + '\n' +
+    '     depuis la page elle-même. Ce fichier ne charge rien d\'extérieur. */\n' +
+    '  window.__xlsxInline = true;\n' +
+    '  window.__xlsxLoadError = false;\n' +
+    '  function xlsxMissing() { window.__xlsxLoadError = true; }\n' +
+    '</' + 'script>\n<' + 'script>\n';
+  return PAGE_SOURCE.slice(0, a) + head + safe + '\n</' + 'script>\n' + FIN + PAGE_SOURCE.slice(b + FIN.length);
+}
+
+function saveStandalone() {
+  if (!libSource) { alert('Indiquez d\'abord le fichier xlsx.full.min.js.'); return; }
+  const page = buildStandalone(libSource);
+  if (!page) { alert('Fabrication impossible : cette page a été modifiée et ses repères d\'intégration sont absents.'); return; }
+  downloadBlob('tableur-autonome.html', page, 'text/html;charset=utf-8;');
+  $('libOkText').textContent = 'Page tout-en-un enregistrée dans vos téléchargements sous le nom tableur-autonome.html. ' +
+    'Ouvrez-la désormais à la place de celle-ci : elle n\'a plus besoin d\'aucun fichier voisin.';
+  $('saveStandaloneBtn').style.display = 'none';
+  log('struct', 'Page tout-en-un enregistrée (librairie intégrée)');
 }
 
 /* =====================================================================
@@ -1689,14 +1772,15 @@ function exportBook(format) {
   XLSX.writeFile(buildWorkbook(), exportBase() + '_' + stamp() + '.' + format);
 }
 
-function downloadText(filename, text) {
-  const blob = new Blob([text], { type: 'text/csv;charset=utf-8;' });
+function downloadBlob(filename, text, type) {
+  const blob = new Blob([text], { type: type || 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
+function downloadText(filename, text) { downloadBlob(filename, text, 'text/csv;charset=utf-8;'); }
 
 function sheetToCsv(name) {
   if (!ensureXlsx('L\'export CSV')) return '';
@@ -2895,6 +2979,22 @@ $('storageSessionsBtn').addEventListener('click', openSessions);
 $('storageExportBtn').addEventListener('click', openExportDialog);
 $('storageRetryBtn').addEventListener('click', saveLocal);
 $('noteCloseBtn').addEventListener('click', () => { $('noteBanner').style.display = 'none'; });
+
+$('pickLibBtn').addEventListener('click', () => $('libUpload').click());
+$('libUpload').addEventListener('change', function (e) {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  file.text().then(code => adoptLibrary(code, file.name)).catch(() => alert('Lecture du fichier impossible.'));
+});
+$('libHelpBtn').addEventListener('click', () => {
+  alert('Le fichier xlsx.full.min.js (librairie SheetJS) se télécharge sur :\n\n' +
+    'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js\n\n' +
+    'Enregistrez-le où vous voulez, puis revenez cliquer sur « Choisir le fichier xlsx.full.min.js… ».\n' +
+    'Enregistrez ensuite la page tout-en-un : vous n\'aurez plus jamais à recommencer.');
+});
+$('saveStandaloneBtn').addEventListener('click', saveStandalone);
+$('libOkCloseBtn').addEventListener('click', () => { $('libOkBanner').style.display = 'none'; });
 
 function openExportDialog() {
   if (!hasData()) { alert("Chargez un fichier ou créez une feuille avant d'exporter."); return; }
