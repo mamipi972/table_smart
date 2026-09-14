@@ -40,6 +40,9 @@ $Source = Absolu $Source
 $Lib    = Absolu $Lib
 $Sortie = Absolu $Sortie
 
+if ($Sortie -eq $Source) {
+  Echec "la sortie ne peut pas être le fichier source : écrire la page autonome par-dessus tableur.html détruirait la version en deux fichiers."
+}
 if (-not (Test-Path -LiteralPath $Source)) { Echec "page introuvable : $Source" }
 if (-not (Test-Path -LiteralPath $Lib)) {
   Echec "librairie introuvable : $Lib`nTéléchargez xlsx.full.min.js (SheetJS) et indiquez son chemin avec -Lib."
@@ -71,6 +74,7 @@ $commentaires = ([regex]::Matches($code, '<!--')).Count
 
 $version = 'version inconnue'
 $m = [regex]::Match($code, 'version\s*=\s*[''"](\d+\.\d+\.\d+)[''"]')
+if (-not $m.Success) { $m = [regex]::Match($code, 'version\s*=\s*[''"]([^''"]{1,20})[''"]') }
 if ($m.Success) { $version = $m.Groups[1].Value }
 
 $date = (Get-Date).ToString('yyyy-MM-dd')
@@ -92,5 +96,5 @@ Write-Host ("  page seule      : " + (Ko $utf8.GetByteCount($html)))
 Write-Host ("  librairie       : " + (Ko $utf8.GetByteCount($code)))
 Write-Host ("  page autonome   : " + (Ko $utf8.GetByteCount($resultat)))
 if ($fermetures -gt 0) { Write-Host "  $fermetures occurrence(s) de « </script » échappée(s)" }
-if ($commentaires -gt 0) { Write-Host "  $commentaires occurrence(s) de « <!-- » laissée(s) telles quelles (en milieu de ligne, donc inertes)" }
+if ($commentaires -gt 0) { Write-Host "  $commentaires occurrence(s) de « <!-- » laissée(s) telles quelles (position non vérifiée ici, contrairement à la version Node)" }
 Write-Host "`nVérifiez la page une fois dans le navigateur : import, export, puis rechargement."

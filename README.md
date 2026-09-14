@@ -254,12 +254,13 @@ Même principe pour les feuilles, dès que **deux lignes partagent une même val
 
 `tests/test.js` pilote un Chromium réel : import, typage, annulation, concurrence entre
 onglets, quota, encodage, injection CSV, noms de feuille, colonnes calculées et
-regroupements proposés — 53 vérifications.
+regroupements proposés — 54 vérifications.
 
 `tests/test-sans-librairie.js` rejoue le parcours du débutant : page ouverte sans la
 librairie, fichier désigné à la main, page tout-en-un enregistrée depuis le navigateur,
-puis rouverte seule pour vérifier qu'elle se suffit — 19 vérifications, dont le contrôle
-que la page livrée n'est pas en retard sur la source.
+puis rouverte seule pour vérifier qu'elle se suffit — 22 vérifications, dont le contrôle
+que la page livrée n'est pas en retard sur la source et que le bouton de la page injecte
+exactement ce qu'injecte `outils/integrer-xlsx.js`.
 
 ```sh
 npm install playwright xlsx     # xlsx sert à fabriquer les fichiers d'essai
@@ -422,7 +423,7 @@ Same idea for sheets, as soon as **two rows share a value**:
 ### Tests
 
 `tests/test.js` drives a real Chromium: import, typing, undo, concurrent tabs, quota,
-encoding, CSV injection, sheet names, computed columns and suggested groupings — 53 checks.
+encoding, CSV injection, sheet names, computed columns and suggested groupings — 54 checks.
 
 ```sh
 npm install playwright xlsx     # xlsx only builds the test fixtures
@@ -431,8 +432,8 @@ node tests/test.js
 
 `tests/test-sans-librairie.js` replays the beginner's route: page opened without the
 library, file picked by hand, all-in-one page saved from the browser, then reopened on its
-own to prove it stands alone — 19 checks, including a guard against the shipped page
-falling behind the source.
+own to prove it stands alone — 22 checks, including guards against the shipped page falling
+behind the source and against the browser build drifting from the Node tool.
 
 Both scripts build their own fixtures, serve the page on a local port, and exit non-zero on
 the first failure.

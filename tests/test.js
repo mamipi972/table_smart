@@ -119,7 +119,8 @@ function check(name, cond, extra) {
   const previews = await page.$$eval('#colSuggestions .preview', ns => ns.map(n => n.textContent));
   check('les apercus sont calcules', previews[0].includes('ligne 1'), previews[0]);
   const idx = suggestions.findIndex(t => /Jours entre Date de debut et Date de fin/.test(t));
-  await page.$$eval('#colSuggestions .sugg-actions button', (bs, i) => bs[i].click(), idx);
+  if (idx < 0) { check('suggestion de duree cliquable', false, suggestions); }
+  else { await page.$$eval('#colSuggestions .sugg-actions button', (bs, i) => bs[i].click(), idx); }
   await page.waitForTimeout(200);
   const calc = await page.evaluate(() => {
     const sh = sheets['Clients'];
@@ -148,7 +149,8 @@ function check(name, cond, extra) {
   check('separation par Ville proposee', sugg2.some(t => /Une feuille par valeur de « Ville »/.test(t)), sugg2);
   check('synthese par Ville proposee', sugg2.some(t => /Synthèse par « Ville »/.test(t)), sugg2);
   const iVille = sugg2.findIndex(t => /Une feuille par valeur de « Ville »/.test(t));
-  await page.$$eval('#sheetSuggestions .sugg-actions button', (bs, i) => bs[i].click(), iVille);
+  if (iVille < 0) { check('separation par Ville cliquable', false, sugg2); }
+  else { await page.$$eval('#sheetSuggestions .sugg-actions button', (bs, i) => bs[i].click(), iVille); }
   await page.waitForTimeout(200);
   const split = await page.evaluate(() => {
     const out = {};
@@ -272,9 +274,20 @@ function check(name, cond, extra) {
   check('la taille distingue deux fichiers homonymes', rows.every(r => /Ko|o$|o /.test(r)), rows);
   await page.click('#closeSessionsBtn');
 
+  console.log('\n== N. fichier reduit a sa ligne d en-tetes ==');
+  await page.setInputFiles('#fileUpload', path.join(dir, 'entetes-seules.csv'));
+  await page.waitForSelector('#importDialog[open]');
+  await page.click('#impMerge');
+  await page.waitForTimeout(200);
+  const entetes = await page.evaluate(() => {
+    const sh = sheets['entetes-seules'];
+    return sh ? { cols: sh.columns.map(c => c.key), lignes: sh.rows.length } : null;
+  });
+  console.log('  ' + JSON.stringify(entetes));
+  check('les en-tetes deviennent des colonnes meme sans donnees',
+    !!entetes && entetes.cols.join(',') === 'Nom,Ville,Montant' && entetes.lignes === 0, entetes);
+
   console.log('\n== M. pas de requete reseau externe ==');
-  const reqs = [];
-  page.on('request', r => reqs.push(r.url()));
   const page3 = await ctx.newPage();
   const ext = [];
   page3.on('request', r => { if (!r.url().startsWith(SITE.replace('/index.html', ''))) ext.push(r.url()); });

@@ -692,10 +692,15 @@ function ensureXlsx(what) {
 }
 function showLibBanner() {
   if (xlsxReady()) { $('libBanner').style.display = 'none'; return; }
-  $('libText').textContent = 'Vous avez ouvert « tableur.html », la version en deux fichiers. ' + libMessage() +
-    " Les formats .xlsx, .xls et .ods attendent donc ; le CSV, la saisie et la sauvegarde fonctionnent déjà. " +
-    "Le plus simple est d'ouvrir « tableur-autonome.html » si vous l'avez : tout y est. " +
-    "Sinon, indiquez le fichier ci-contre — aucune installation n'est nécessaire.";
+  const intro = window.__xlsxInline
+    ? 'Cette page est la version tout-en-un : la librairie devrait y être. '
+    : 'Vous avez ouvert « tableur.html », la version en deux fichiers. ';
+  const conseil = window.__xlsxInline
+    ? " Retéléchargez une copie complète de ce fichier."
+    : " Le plus simple est d'ouvrir « tableur-autonome.html » si vous l'avez : tout y est. " +
+      "Sinon, indiquez le fichier ci-contre — aucune installation n'est nécessaire.";
+  $('libText').textContent = intro + libMessage() +
+    " Les formats .xlsx, .xls et .ods attendent donc ; le CSV, la saisie et la sauvegarde fonctionnent déjà." + conseil;
   $('libBanner').style.display = 'flex';
   $('pickLibBtn').style.display = window.__xlsxInline ? 'none' : 'inline-block';
   $('libHelpBtn').style.display = window.__xlsxInline ? 'none' : 'inline-block';
@@ -786,9 +791,16 @@ function refreshDocLabel() {
   node.title = hasData() ? describeDoc() : '';
 }
 
-function lsAvailable() {
-  try { localStorage.setItem('tableur.probe', '1'); localStorage.removeItem('tableur.probe'); return true; }
-  catch (e) { return false; }
+/* « plein » et « bloqué » appellent des remèdes opposés : libérer de la place,
+   ou sortir de la navigation privée. Les confondre enverrait l'utilisateur au
+   mauvais endroit et priverait de restauration des sessions pourtant intactes. */
+function lsState() {
+  try { localStorage.setItem('tableur.probe', '1'); localStorage.removeItem('tableur.probe'); return 'ok'; }
+  catch (e) {
+    const plein = e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+      e.code === 22 || e.code === 1014);
+    return plein ? 'plein' : 'bloque';
+  }
 }
 
 function scheduleSave() {
@@ -841,7 +853,12 @@ function saveLocal() {
       localStorage.setItem(key, payload);
       localStorage.setItem(metaKey, sessionMeta(payload.length));
       log('struct', 'Sauvegarde locale conservée sans le journal, faute de place');
-    } catch (e2) { quotaFailure(e2, payload.length); return; }
+    } catch (e2) {
+      // une charge utile sans fiche serait invisible dans la liste des sessions,
+      // donc ni restaurable ni supprimable : on ne la laisse pas derrière nous
+      try { if (!localStorage.getItem(metaKey)) localStorage.removeItem(key); } catch (e3) { /* rien */ }
+      quotaFailure(e2, payload.length); return;
+    }
   }
   dirtyLocal = false;
   storageBlocked = false;
@@ -934,6 +951,11 @@ function foreignLock(name) {
   const l = readLock(name);
   return (lockAlive(l) && l.tab !== TAB_ID) ? l : null;
 }
+function releaseLock(name) {
+  const l = readLock(name);
+  if (l && l.tab === TAB_ID) { try { localStorage.removeItem(LS_LOCK + name); } catch (e) { /* rien */ } }
+  heldLocks = heldLocks.filter(n => n !== name);
+}
 function takeLock(name, label) {
   try { localStorage.setItem(LS_LOCK + name, JSON.stringify({ tab: TAB_ID, at: Date.now(), label: label || '' })); } catch (e) { /* rien */ }
   if (heldLocks.indexOf(name) === -1) heldLocks.push(name);
@@ -958,6 +980,9 @@ function fileLockName(name) { return 'fichier::' + String(name).toLowerCase(); }
 /* Appelé à chaque changement de document (import, restauration). */
 function claimDocument(label, silent) {
   const name = docLockName();
+  // sans cela, l'onglet continuerait de revendiquer tous les documents qu'il a
+  // ouverts, et bloquerait la sauvegarde d'un autre onglet sur un document quitté
+  heldLocks.filter(n => n !== name && n.indexOf('doc::') === 0).forEach(releaseLock);
   const other = silent ? null : foreignLock(name);
   if (other) {
     autosaveOff = true;
@@ -1038,7 +1063,9 @@ async function readHandleInfo() {
 
 async function saveToFile() {
   if (!fileHandle) return;
-  if (linkedType !== 'csv' && !xlsxReady()) {
+  // sheetToCsv a besoin de la librairie tout autant que l'écriture xlsx :
+  // sans elle, on écrirait un fichier vide par-dessus celui de l'utilisateur
+  if (!xlsxReady()) {
     dirtyFile = true;
     refreshLinkedStatus('écriture impossible : ' + libMessage(), 'fail');
     return;
@@ -1130,12 +1157,7 @@ async function locateFolder() {
 
 function unlinkFile() {
   if (dirtyFile && !confirm('Une écriture est encore en attente sur « ' + (linkedInfo ? linkedInfo.name : 'le fichier') + ' ». Délier maintenant la perdrait.\n\nContinuer ?')) return;
-  if (linkedInfo) {
-    const name = fileLockName(linkedInfo.name);
-    const l = readLock(name);
-    if (l && l.tab === TAB_ID) { try { localStorage.removeItem(LS_LOCK + name); } catch (e) { /* rien */ } }
-    heldLocks = heldLocks.filter(n => n !== name);
-  }
+  if (linkedInfo) releaseLock(fileLockName(linkedInfo.name));
   fileHandle = null; linkedInfo = null; linkedType = 'xlsx'; dirtyFile = false;
   clearTimeout(fsTimer);
   $('unlinkFileBtn').style.display = 'none';
@@ -1238,6 +1260,13 @@ function rowsFromMatrix(matrix, keepRaw) {
    disparaissaient en silence. « constructor » et « prototype » sont tout
    aussi piégeux à la lecture. */
 const RESERVED_KEYS = ['__proto__', 'constructor', 'prototype'];
+
+/* Écrire row['__proto__'] = v ne crée aucune propriété : la colonne serait
+   vide à jamais. L'import assainit déjà ses en-têtes ; la création et le
+   renommage manuels doivent en faire autant. */
+function safeColumnKey(name) {
+  return RESERVED_KEYS.indexOf(String(name)) !== -1 ? String(name).replace(/^_+|_+$/g, '') + '_' : String(name);
+}
 function sanitizeKeys(rows) {
   const renamed = [];
   const map = new Map();
@@ -1258,8 +1287,10 @@ function sanitizeKeys(rows) {
 }
 
 /* -------------------------------------------------- détection des types */
-function detectColumns(rows, textRows) {
+function detectColumns(rows, textRows, headers) {
   const stats = new Map();
+  // les en-têtes fixent la liste et l'ordre des colonnes, même sans une seule ligne
+  (headers || []).forEach(h => stats.set(String(h), { date: 0, num: 0, text: 0, serial: 0, longDec: 0, zero: 0, big: 0 }));
   rows.forEach((row, i) => {
     const trow = (textRows && textRows[i]) || null;
     Object.keys(row).forEach(key => {
@@ -1375,6 +1406,10 @@ function coerce(col, raw) {
   if (col.type === 'number') {
     const n = numberOf(raw);
     return n === null ? raw : n;
+  }
+  if (col.type === 'date') {
+    const d = toDate(raw);
+    return d ? isoFromDate(d) : raw;
   }
   return raw;
 }
@@ -1541,8 +1576,8 @@ function freezeFormulasUsing(sh, key) {
 /* =====================================================================
    8. Import
    ===================================================================== */
-function buildSheetFromRows(rawRows, textRows, renamed) {
-  const columns = detectColumns(rawRows, textRows);
+function buildSheetFromRows(rawRows, textRows, renamed, headers) {
+  const columns = detectColumns(rawRows, textRows, headers);
   const guarded = new Set(columns.filter(c => c.guard).map(c => c.key));
   const merged = rawRows.map((row, i) => {
     const out = {};
@@ -1572,7 +1607,7 @@ async function analyseFile(file) {
     const matrix = parseDelimited(dec.text, sep);
     if (!matrix.length) throw new Error('fichier vide');
     const parsed = rowsFromMatrix(matrix, false);
-    const built = buildSheetFromRows(parsed.rows, parsed.rows, parsed.renamed);
+    const built = buildSheetFromRows(parsed.rows, parsed.rows, parsed.renamed, parsed.headers);
     const name = file.name.replace(/\.[^.]+$/, '').slice(0, 60) || 'Feuille';
     out.sheets[name] = built.sheet;
     notes.push('Séparateur détecté : ' + (sep === '\t' ? 'tabulation' : '« ' + sep + ' »') + '.');
@@ -1591,7 +1626,7 @@ async function analyseFile(file) {
     try {
       formatted = rowsFromMatrix(XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false, raw: false }), false);
     } catch (e) { formatted = null; }
-    const built = buildSheetFromRows(raw.rows, formatted ? formatted.rows : null, raw.renamed);
+    const built = buildSheetFromRows(raw.rows, formatted ? formatted.rows : null, raw.renamed, raw.headers);
     out.sheets[name] = built.sheet;
     collectNotes(notes, name, built);
   });
@@ -1925,7 +1960,7 @@ $('deleteSheet').addEventListener('click', () => {
 
 function addColumn(name, type, index, formula) {
   const sh = sheet();
-  const final = uniqueName(name, sh.columns.map(c => c.key));
+  const final = uniqueName(safeColumnKey(name), sh.columns.map(c => c.key));
   const col = { key: final, type: type };
   if (formula) col.formula = formula;
   mutate('struct', 'Colonne « ' + final + ' » ajoutée (' + (formula ? 'calculée : ' + FORMULAS[formula.op].label(formula.args) : type) + ')', () => {
@@ -1940,7 +1975,7 @@ function renameColumn(key) {
   const sh = sheet();
   const name = (prompt('Nouveau nom de la colonne :', key) || '').trim();
   if (!name || name === key) return;
-  const final = uniqueName(name, sh.columns.filter(c => c.key !== key).map(c => c.key));
+  const final = uniqueName(safeColumnKey(name), sh.columns.filter(c => c.key !== key).map(c => c.key));
   mutate('struct', 'Colonne « ' + key + ' » renommée en « ' + final + ' »', () => {
     sh.columns.forEach(c => { if (c.key === key) c.key = final; });
     sh.rows.forEach(r => { r[final] = cellValue(r, key); delete r[key]; });
@@ -1983,6 +2018,15 @@ function changeColumnType(key) {
     if (risky && !confirm(risky + ' valeur(s) de « ' + key + ' » seraient abîmées en type nombre : ' +
         'un zéro initial disparaît (01234 devient 1234) et au-delà de quinze chiffres la précision saute.\n\n' +
         'OK = convertir quand même. Annuler = garder le type texte.')) return;
+  }
+  if (t === 'date') {
+    const perdues = sh.rows.filter(r => {
+      const v = cellValue(r, key);
+      return v !== '' && v !== null && v !== undefined && !toDate(v);
+    }).length;
+    if (perdues && !confirm(perdues + ' valeur(s) de « ' + key + ' » ne ressemblent pas à une date et ne seront pas ' +
+        'converties. Le formulaire de saisie ne saura pas les afficher et les effacerait à la première modification.\n\n' +
+        'OK = convertir quand même. Annuler = garder le type actuel.')) return;
   }
   mutate('struct', 'Colonne « ' + key + ' » passée en ' + t, () => {
     col.type = t;
@@ -2154,7 +2198,7 @@ function buildColumnSuggestions(sh) {
 
   // 4. paires de nombres
   for (let i = 0; i < plainNumbers.length && out.length < 40; i++) {
-    for (let j = i + 1; j < plainNumbers.length; j++) {
+    for (let j = i + 1; j < plainNumbers.length && out.length < 40; j++) {
       const a = plainNumbers[i].key, b = plainNumbers[j].key;
       const qty = /quantit|nombre|nb|qte|qté|unit/i;
       const price = /prix|tarif|montant|coût|cout|unitaire|pu\b/i;
@@ -2275,7 +2319,9 @@ function categoryColumns(sh) {
 function sheetsWithSameShape() {
   const byShape = new Map();
   Object.keys(sheets).forEach(name => {
-    const keys = sheets[name].columns.map(c => c.key).slice().sort().join('');
+    // séparateur impossible dans un nom de colonne : « Nom » + « Ville » ne doit
+    // pas donner la même signature que « NomVille »
+    const keys = sheets[name].columns.map(c => c.key).slice().sort().join('\u0000');
     if (!byShape.has(keys)) byShape.set(keys, []);
     byShape.get(keys).push(name);
   });
@@ -2320,21 +2366,23 @@ function summarySheet(sourceName, key, mapper, title) {
   const label = uniqueName(key, ['Nombre de lignes']);
   const columns = [{ key: label, type: 'text' }, { key: 'Nombre de lignes', type: 'number' }];
   numeric.forEach(c => columns.push({ key: uniqueName('Somme de ' + c.key, columns.map(x => x.key)), type: 'number' }));
+  // une seule passe sur les lignes : le cumul par groupe évite de relire la
+  // feuille entière pour chaque valeur et chaque colonne numérique
+  const totaux = new Map();
+  src.rows.forEach(r => {
+    const v = mapper ? mapper(cellValue(r, key)) : String(cellValue(r, key) ?? '').trim();
+    if (v === '' || v === null || v === undefined) return;
+    let e = totaux.get(v);
+    if (!e) { e = numeric.map(() => 0); totaux.set(v, e); }
+    numeric.forEach((c, i) => { const n = numberOf(cellValue(r, c.key)); if (n !== null) e[i] += n; });
+  });
   const rows = g.groups.map(pair => {
     const value = pair[0], count = pair[1];
     const row = {};
     row[label] = value;
     row['Nombre de lignes'] = count;
-    numeric.forEach((c, i) => {
-      let total = 0;
-      src.rows.forEach(r => {
-        const v = mapper ? mapper(cellValue(r, key)) : String(cellValue(r, key) ?? '').trim();
-        if (v !== value) return;
-        const n = numberOf(cellValue(r, c.key));
-        if (n !== null) total += n;
-      });
-      row[columns[2 + i].key] = round2(total);
-    });
+    const e = totaux.get(value) || [];
+    numeric.forEach((c, i) => { row[columns[2 + i].key] = round2(e[i] || 0); });
     return row;
   });
   const name = uniqueName(title, Object.keys(sheets));
@@ -2537,6 +2585,8 @@ function saveRow() {
   inputs.forEach(input => {
     const col = sh.columns.find(c => c.key === input.dataset.key);
     if (!col || computedColumn(col)) return;
+    // champ laissé vide parce qu'il ne savait pas montrer la valeur : on n'y touche pas
+    if (input.dataset.intact === '1' && input.value.trim() === '') return;
     cols.push(col);
     raw[col.key] = input.value.trim();
     if (raw[col.key] !== '') filled = true;
@@ -2589,7 +2639,17 @@ function editRow(index) {
   const row = sheet().rows[index];
   document.querySelectorAll('.dynamic-field').forEach(input => {
     const v = cellValue(row, input.dataset.key);
-    input.value = (v === null || v === undefined) ? '' : v;
+    const texte = (v === null || v === undefined) ? '' : String(v);
+    input.value = texte;
+    // un <input type="date"> refuse « 15/03/2025 » et se retrouve vide : enregistrer
+    // ce vide effacerait la valeur sans que personne n'y ait touché
+    delete input.dataset.intact;
+    if (texte !== '' && input.value === '') {
+      input.dataset.intact = '1';
+      input.placeholder = 'valeur actuelle : ' + shortValue(texte);
+      input.title = 'Cette valeur ne peut pas s\'afficher dans un champ « ' + input.type + ' ». ' +
+        'Laissée telle quelle si vous n\'y touchez pas.';
+    }
   });
   $('editIndex').value = index;
   $('saveBtn').textContent = 'Mettre à jour la ligne';
@@ -3059,12 +3119,20 @@ if (!('showSaveFilePicker' in window)) {
   $('linkFileBtn').title = 'Disponible sur Chrome et Edge uniquement';
 }
 showLibBanner();
-if (!lsAvailable()) {
+const etatStockage = lsState();
+if (etatStockage === 'bloque') {
   storageBlocked = true;
   $('storageText').textContent = 'Le stockage du navigateur est inaccessible (navigation privée ou cookies bloqués) : ' +
     'rien ne sera conservé à la fermeture de l\'onglet. Exportez vos données avant de fermer.';
   $('storageBanner').style.display = 'flex';
 } else {
+  if (etatStockage === 'plein') {
+    storageBlocked = true;
+    $('storageText').textContent = 'La mémoire du navigateur est saturée : les nouvelles modifications ne seront pas ' +
+      'enregistrées. Les sessions déjà sauvegardées restent lisibles — supprimez-en depuis « Sessions enregistrées ».';
+    $('storageBanner').style.display = 'flex';
+  }
+  // même saturé, le stockage se lit : les sessions existantes doivent rester offertes
   migrateLegacy();
   restoreUi();
 }

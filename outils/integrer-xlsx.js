@@ -15,6 +15,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 const racine = path.join(__dirname, '..');
 const args = process.argv.slice(2);
@@ -36,6 +37,10 @@ const FIN = '<!-- FIN chargement de la librairie -->';
 
 function echec(message) { console.error('Échec : ' + message); process.exit(1); }
 
+if (path.resolve(sortie) === path.resolve(source)) {
+  echec('la sortie ne peut pas être le fichier source : écrire la page autonome par-dessus\n' +
+    'tableur.html détruirait la version en deux fichiers, irrécupérable ensuite.');
+}
 if (!fs.existsSync(source)) echec('page introuvable : ' + source);
 if (!fs.existsSync(lib)) {
   echec('librairie introuvable : ' + lib + '\n' +
@@ -59,19 +64,25 @@ if (code.charCodeAt(0) === 0xFEFF) code = code.slice(1);
 const fermetures = (code.match(/<\/script/gi) || []).length;
 if (fermetures) code = code.replace(/<\/script/gi, '<\\/script');
 
-/* « <!-- » et « --> » ouvrent un commentaire dans un script classique. Dans
-   SheetJS ils n'apparaissent qu'au milieu d'une ligne, en chaîne ou en
-   expression régulière (nettoyage de fragments HTML), donc inertes — mais
-   « --> » en début de ligne serait bien lu comme un commentaire : on vérifie. */
+/* « <!-- » et « --> » ouvrent un commentaire dans un script classique : le
+   premier commente la fin de sa ligne, le second doit être en début de ligne.
+   Savoir s'ils tombent dans une chaîne ou une expression régulière demande un
+   analyseur — alors on en utilise un : si le code, une fois échappé, ne se
+   compile plus, c'est qu'une de ces séquences a mangé quelque chose. */
 const commentaires = (code.match(/<!--/g) || []).length;
-const suspects = code.split('\n').filter(l => /^\s*-->/.test(l)).length;
-if (suspects) {
+if (code.split('\n').filter(l => /^\s*-->/.test(l)).length) {
   echec('la librairie contient une ligne commençant par « --> », qui serait lue comme\n' +
     'un commentaire une fois intégrée. Intégration abandonnée.');
 }
+try {
+  new vm.Script(code, { filename: 'xlsx.full.min.js' });
+} catch (e) {
+  echec('la librairie ne se compile pas telle qu\'elle sera intégrée : ' + e.message + '\n' +
+    'Fichier corrompu, ou séquence « <!-- » en plein code. Intégration abandonnée.');
+}
 
 const version = (code.match(/version\s*=\s*['"](\d+\.\d+\.\d+)['"]/) || [])[1] ||
-                (code.match(/XLSX\.version\s*=\s*['"]([^'"]+)['"]/) || [])[1] || 'version inconnue';
+                (code.match(/version\s*=\s*['"]([^'"]{1,20})['"]/) || [])[1] || 'version inconnue';
 
 const remplacement = DEBUT + '\n' +
   '<script>\n' +
@@ -93,5 +104,5 @@ console.log('  page seule      : ' + ko(Buffer.byteLength(html)));
 console.log('  librairie       : ' + ko(Buffer.byteLength(code)));
 console.log('  page autonome   : ' + ko(Buffer.byteLength(resultat)));
 if (fermetures) console.log('  ' + fermetures + ' occurrence(s) de « </script » échappée(s)');
-if (commentaires) console.log('  ' + commentaires + ' occurrence(s) de « <!-- » laissée(s) telles quelles (en milieu de ligne, donc inertes)');
+if (commentaires) console.log('  ' + commentaires + ' occurrence(s) de « <!-- » laissée(s) telles quelles (code vérifié compilable)');
 console.log('\nVérifiez la page une fois dans le navigateur : import, export, puis rechargement.');

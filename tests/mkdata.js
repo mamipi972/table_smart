@@ -40,4 +40,7 @@ XLSX.writeFile(wb2, at('autre.xlsx'));
 // CSV latin-1 avec injection de formule et zeros initiaux
 const latin = Buffer.from('Nom;Ville;CP;Note\r\n"Crème brûlée";Paris;01234;=SUM(A1:A9)\r\nPâté;Lyon;69003;+33 1\r\n', 'latin1');
 fs.writeFileSync(at('latin1.csv'), latin);
+// un modele vierge : des en-tetes, pas une seule ligne de donnees
+fs.writeFileSync(at('entetes-seules.csv'), '\ufeffNom;Ville;Montant\r\n', 'utf8');
+
 console.log('fichiers d essai ecrits dans ' + out);

@@ -13,6 +13,8 @@ const http = require('http');
 const { execFileSync } = require('child_process');
 
 const dir = path.join(__dirname, '.tmp', 'sans-lib');
+const DEBUT = '<!-- DEBUT chargement de la librairie -->';
+const FIN = '<!-- FIN chargement de la librairie -->';
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.csv': 'text/csv', '.xlsx': 'application/octet-stream' };
 let pass = 0, fail = 0;
 function check(name, cond, extra) {
@@ -125,8 +127,6 @@ function serve(root) {
   check('aucune requete exterieure', requetes.length === 0, requetes);
 
   console.log('\n== 6. la page tout-en-un livree est a jour ==');
-  const DEBUT = '<!-- DEBUT chargement de la librairie -->';
-  const FIN = '<!-- FIN chargement de la librairie -->';
   const hors = t => {
     const a = t.indexOf(DEBUT), b = t.indexOf(FIN);
     return (a < 0 || b < 0) ? null : t.slice(0, a) + t.slice(b + FIN.length);
@@ -139,6 +139,25 @@ function serve(root) {
     const b = hors(fs.readFileSync(livree, 'utf8'));
     check('tableur-autonome.html suit tableur.html (sinon : node outils/integrer-xlsx.js)', a !== null && a === b,
       a === b ? 'identique' : 'la page livree est en retard sur la source');
+  }
+
+  console.log('\n== 7. la fabrication du navigateur et celle de l outil coincident ==');
+  // Ce qui doit coincider, c'est le bloc injecte entre les deux reperes : c'est
+  // lui que les trois implementations (page, .js, .ps1) produisent. Le reste du
+  // fichier vient de la meme source, mais le navigateur reserialise le document
+  // (attributs booleens, entites, sauts de ligne), donc l'octet a octet n'y a
+  // pas de sens.
+  const bloc = t => {
+    const a = t.indexOf(DEBUT), b = t.indexOf(FIN);
+    return (a < 0 || b < 0) ? null : t.slice(a, b + FIN.length).replace(/\/\* Librairie SheetJS[\s\S]*?\*\//, '');
+  };
+  if (fs.existsSync(livree)) {
+    const parNavigateur = bloc(contenu);
+    const parOutil = bloc(fs.readFileSync(livree, 'utf8'));
+    check('le bouton de la page injecte exactement ce qu injecte outils/integrer-xlsx.js',
+      parNavigateur !== null && parNavigateur === parOutil,
+      parNavigateur === parOutil ? 'identique' : 'ecart de ' +
+        Math.abs((parNavigateur || '').length - (parOutil || '').length) + ' caracteres');
   }
 
   console.log('\n' + pass + ' verifications ok, ' + fail + ' echecs');
