@@ -16,6 +16,30 @@ Le texte en exergue ci-dessus est celui du champ « About » du dépôt. Sujets 
 
 ## Mise en route
 
+**La page existe sous deux formes.** C'est la confusion la plus fréquente, alors
+autant la lever tout de suite :
+
+| Fichier | Librairie SheetJS | Poids | Pour l'ouvrir |
+|---|---|---|---|
+| `tableur-autonome.html` | **dedans** | ~1 Mo | double-clic, rien d'autre |
+| `tableur.html` (ce dépôt) | **à côté** | 126 Ko | avec `xlsx.full.min.js` dans le même dossier |
+
+Pour savoir laquelle vous avez en main, cherchez `__xlsxInline = true` dans le
+fichier HTML : présent, la librairie est dedans. Sinon, ouvrez la page — un
+bandeau rouge apparaît quand le fichier voisin manque.
+
+### La version autonome
+
+Double-cliquez sur `tableur-autonome.html`. C'est tout.
+
+Ce fichier n'est pas versionné dans le dépôt : il pèse 1 Mo, il se régénère en une
+commande (voir [Fabriquer la version autonome](#fabriquer-la-version-autonome)), et
+versionner une librairie minifiée rendrait l'historique illisible — chaque mise à
+jour de SheetJS ajouterait 1 Mo de diff incompréhensible. Le dépôt garde donc la
+source ; l'autonome est un produit fini qu'on fabrique.
+
+### La version du dépôt
+
 1. Placez `xlsx.full.min.js` (SheetJS 0.20.3) **à côté** de `tableur.html`.
 2. Ouvrez `tableur.html`.
 
@@ -35,9 +59,9 @@ Ouvrir la page depuis un petit serveur local (`npx http-server`) plutôt qu'en
 `file://` isole proprement le stockage du navigateur : en `file://`, selon le
 navigateur, tous les fichiers HTML locaux se partagent le même espace.
 
-### Variante en un seul fichier
+### Fabriquer la version autonome
 
-Pour n'avoir plus qu'un fichier à transporter, la librairie peut être recopiée
+Pour n'avoir plus qu'un fichier à transporter, la librairie est recopiée
 **dans** la page :
 
 ```sh
@@ -201,6 +225,29 @@ request, nothing leaves the machine. The interface itself is in French.
 
 ### Getting started
 
+**The page comes in two shapes** — this is the usual point of confusion, so here it is
+up front:
+
+| File | SheetJS library | Size | How to open it |
+|---|---|---|---|
+| `tableur-autonome.html` | **inside** | ~1 MB | double-click, nothing else |
+| `tableur.html` (this repo) | **alongside** | 126 KB | with `xlsx.full.min.js` in the same folder |
+
+To tell which one you have, search the HTML for `__xlsxInline = true`: if it is there,
+the library is inside. Otherwise open the page — a red banner shows up when the
+neighbouring file is missing.
+
+#### The standalone file
+
+Double-click `tableur-autonome.html`. That is all.
+
+It is not tracked in the repository: it weighs 1 MB, it is rebuilt with one command (see
+[Single-file build](#single-file-build)), and versioning a minified library would wreck
+the history — every SheetJS update would add a megabyte of unreadable diff. The
+repository keeps the source; the standalone file is a build product.
+
+#### The repository version
+
 1. Put `xlsx.full.min.js` (SheetJS 0.20.3) **next to** `tableur.html`.
 2. Open `tableur.html`.
 
@@ -218,9 +265,9 @@ Serving the page from a small local server (`npx http-server`) rather than openi
 `file://` properly isolates browser storage: under `file://`, depending on the browser,
 every local HTML file shares the same storage area.
 
-#### Single-file variant
+#### Single-file build
 
-To carry a single file, the library can be copied **into** the page:
+To carry a single file, the library is copied **into** the page:
 
 ```sh
 node outils/integrer-xlsx.js                       # expects ./xlsx.full.min.js
