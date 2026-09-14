@@ -54,7 +54,9 @@ function serve(root) {
   await page.goto(SITE);
   check('bandeau rouge affiche', await page.isVisible('#libBanner'));
   const texte = await page.textContent('#libText');
-  check('le bandeau dit quoi faire', /indiquez-le/.test(texte), texte);
+  check('le bandeau nomme la page ouverte', /tableur\.html/.test(texte), texte);
+  check('le bandeau cite la voie la plus simple', /tableur-autonome\.html/.test(texte), texte);
+  check('le bandeau dit quoi faire', /indiquez le fichier/.test(texte), texte);
   check('bouton de selection propose', await page.isVisible('#pickLibBtn'));
   check('la librairie est bien absente', await page.evaluate(() => typeof XLSX === 'undefined'));
 

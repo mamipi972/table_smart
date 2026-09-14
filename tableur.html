@@ -692,9 +692,10 @@ function ensureXlsx(what) {
 }
 function showLibBanner() {
   if (xlsxReady()) { $('libBanner').style.display = 'none'; return; }
-  $('libText').textContent = libMessage() +
-    " Les formats .xlsx, .xls et .ods sont indisponibles (import comme export) ; le CSV reste utilisable. " +
-    "Si vous avez le fichier sur votre disque, indiquez-le ci-contre : aucune installation n'est nécessaire.";
+  $('libText').textContent = 'Vous avez ouvert « tableur.html », la version en deux fichiers. ' + libMessage() +
+    " Les formats .xlsx, .xls et .ods attendent donc ; le CSV, la saisie et la sauvegarde fonctionnent déjà. " +
+    "Le plus simple est d'ouvrir « tableur-autonome.html » si vous l'avez : tout y est. " +
+    "Sinon, indiquez le fichier ci-contre — aucune installation n'est nécessaire.";
   $('libBanner').style.display = 'flex';
   $('pickLibBtn').style.display = window.__xlsxInline ? 'none' : 'inline-block';
   $('libHelpBtn').style.display = window.__xlsxInline ? 'none' : 'inline-block';
@@ -2988,10 +2989,14 @@ $('libUpload').addEventListener('change', function (e) {
   file.text().then(code => adoptLibrary(code, file.name)).catch(() => alert('Lecture du fichier impossible.'));
 });
 $('libHelpBtn').addEventListener('click', () => {
-  alert('Le fichier xlsx.full.min.js (librairie SheetJS) se télécharge sur :\n\n' +
-    'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js\n\n' +
-    'Enregistrez-le où vous voulez, puis revenez cliquer sur « Choisir le fichier xlsx.full.min.js… ».\n' +
-    'Enregistrez ensuite la page tout-en-un : vous n\'aurez plus jamais à recommencer.');
+  alert('Cette page-ci est « tableur.html », la version en deux fichiers : elle a besoin de la ' +
+    'librairie SheetJS pour lire les classeurs Excel.\n\n' +
+    '— Le plus simple : ouvrez « tableur-autonome.html » à la place. Tout y est déjà, ' +
+    'rien à télécharger ni à installer.\n\n' +
+    '— Sinon, le fichier xlsx.full.min.js se télécharge sur :\n' +
+    'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js\n' +
+    'Enregistrez-le où vous voulez, revenez cliquer sur « Choisir le fichier xlsx.full.min.js… », ' +
+    'puis enregistrez la page tout-en-un : vous n\'aurez plus jamais à recommencer.');
 });
 $('saveStandaloneBtn').addEventListener('click', saveStandalone);
 $('libOkCloseBtn').addEventListener('click', () => { $('libOkBanner').style.display = 'none'; });
