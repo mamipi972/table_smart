@@ -61,13 +61,30 @@ navigateur, tous les fichiers HTML locaux se partagent le même espace.
 
 ### Fabriquer la version autonome
 
-Pour n'avoir plus qu'un fichier à transporter, la librairie est recopiée
-**dans** la page :
+Étape utile seulement pour **produire** `tableur-autonome.html` — mettre à jour
+SheetJS, par exemple. Si vous avez déjà ce fichier, il n'y a rien à lancer.
+
+Depuis le dossier du projet, la librairie est recopiée **dans** la page. Deux
+outils équivalents, selon ce qui est installé :
 
 ```sh
+# avec Node.js (Windows, macOS, Linux)
 node outils/integrer-xlsx.js                       # attend ./xlsx.full.min.js
 node outils/integrer-xlsx.js --lib ~/xlsx.full.min.js --sortie tableur-autonome.html
 ```
+
+```powershell
+# sans Node.js, avec PowerShell seul (Windows)
+.\outils\integrer-xlsx.ps1
+.\outils\integrer-xlsx.ps1 -Lib "$HOME\Downloads\xlsx.full.min.js" -Sortie tableur-autonome.html
+```
+
+Le script `.js` demande [Node.js](https://nodejs.org) (`winget install OpenJS.NodeJS.LTS`
+sous Windows, puis rouvrir le terminal). Le `.ps1` n'a besoin de rien d'autre que
+Windows ; si l'exécution est refusée, autorisez-la pour la session en cours avec
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`. Les deux produisent
+le même fichier — le `.ps1` n'a pas pu être exécuté lors de son écriture, faute de
+PowerShell sur la machine de développement : signalez tout écart.
 
 Le résultat s'ouvre seul, depuis une clé USB ou une pièce jointe, sans fichier
 voisin ni réseau. Contreparties : environ **1 Mo** (126 Ko pour la page, 930 Ko
@@ -267,12 +284,29 @@ every local HTML file shares the same storage area.
 
 #### Single-file build
 
-To carry a single file, the library is copied **into** the page:
+Only needed to **produce** `tableur-autonome.html` — to update SheetJS, for instance.
+If you already have that file, there is nothing to run.
+
+From the project folder, the library is copied **into** the page. Two equivalent tools,
+depending on what is installed:
 
 ```sh
+# with Node.js (Windows, macOS, Linux)
 node outils/integrer-xlsx.js                       # expects ./xlsx.full.min.js
 node outils/integrer-xlsx.js --lib ~/xlsx.full.min.js --sortie tableur-autonome.html
 ```
+
+```powershell
+# without Node.js, PowerShell only (Windows)
+.\outils\integrer-xlsx.ps1
+.\outils\integrer-xlsx.ps1 -Lib "$HOME\Downloads\xlsx.full.min.js" -Sortie tableur-autonome.html
+```
+
+The `.js` script needs [Node.js](https://nodejs.org); the `.ps1` needs nothing but
+Windows (if execution is blocked, allow it for the current session with
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`). Both produce the same
+file — the `.ps1` could not be executed as it was written, for lack of PowerShell on
+the development machine: please report any discrepancy.
 
 The result opens on its own — from a USB stick or an email attachment — with no
 neighbouring file and no network. The trade-off is about **1 MB** (126 KB page, 930 KB
