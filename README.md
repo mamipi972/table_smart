@@ -173,6 +173,10 @@ TABLEUR=tableur-autonome.html node tests/test.js
 - Les colonnes à **zéro initial** (code postal `01234`, téléphone `0612345678`) et
   celles dépassant **quinze chiffres significatifs** restent en type texte, et
   l'import le signale colonne par colonne.
+- L'**intitulé** suffit désormais : `CP`, `Code postal`, `Tél`, `Téléphone`, `SIRET`,
+  `IBAN`, `Référence`, `Matricule`, `N°`… restent du texte même quand aucune valeur
+  n'a de zéro initial. Les colonnes à décimales en sont exclues, pour qu'un
+  « Montant TVA » reste un nombre.
 - Le fichier est lu deux fois (valeurs natives + texte affiché) pour récupérer le
   `01234` d'une cellule numérique formatée.
 - Une saisie à zéro initial dans une colonne nombre propose de basculer la colonne
@@ -218,11 +222,19 @@ détectés, chacun avec un aperçu sur les premières lignes :
 - deux colonnes de date → nombre de **jours**, de **mois** ou d'**années** entre les deux
   (la colonne « début » est reconnue par son intitulé, sinon par le sens des écarts) ;
 - deux colonnes d'**années** (entiers 1900–2100) → écart en années ;
-- une date → année, mois (AAAA-MM), trimestre, ancienneté en jours ;
+- une date → année, **mois en toutes lettres** (« août »), mois et année en lettres
+  (« août 2025 »), mois au format AAAA-MM qui se trie correctement, trimestre,
+  ancienneté en jours ;
 - deux nombres → différence, pourcentage, et produit quand les intitulés ressemblent
   à une quantité et à un prix ;
-- un nombre → part dans le total de la feuille ;
+- une colonne de chiffres → **répartition en %** (les parts totalisent 100), et
+  **classement** : 1 pour la plus grande valeur, les ex æquo partageant leur rang ;
+- une colonne de chiffres et une colonne catégorielle → **classement par groupe**,
+  qui repart de 1 dans chaque ville, chaque service, chaque catégorie ;
 - du texte → domaine d'une adresse e-mail, concaténation de deux colonnes.
+
+Les suggestions sont servies **une par famille à tour de rôle** : sans cela, deux
+colonnes de date suffisent à remplir la liste et masquent tout le reste.
 
 Une colonne calculée **se recalcule automatiquement** à chaque modification de ses
 sources, suit les renommages, et se fige en valeurs si sa source disparaît ou sur
@@ -237,6 +249,22 @@ Même principe pour les feuilles, dès que **deux lignes partagent une même val
   numériques ;
 - une synthèse par année ou par mois d'une colonne de date ;
 - la fusion des feuilles de structure identique, avec une colonne « Feuille d'origine ».
+
+## Nettoyage des espaces
+
+Un espace au bord d'une cellule ou doublé entre deux mots ne se voit pas, mais sépare
+« Paris » de « Paris  » dans les tris, les recherches et les regroupements — deux villes
+là où il n'y en a qu'une.
+
+La page les repère toute seule après un import ou une restauration, et propose de les
+supprimer : nombre de cellules concernées, feuille par feuille, avec un **aperçu avant /
+après** des douze premières. Le bouton **« Nettoyer »** de la barre des feuilles relance
+l'examen à la demande sur la feuille affichée. Le nettoyage passe par l'historique, donc
+**Ctrl+Z le défait**.
+
+Deux règles, et deux seulement : les espaces de début et de fin sont supprimés, les suites
+de deux espaces ou plus deviennent un espace simple. Les retours à la ligne à l'intérieur
+d'une cellule sont laissés intacts, et les nombres comme les dates ne sont pas touchés.
 
 ## Limites connues
 
@@ -254,7 +282,8 @@ Même principe pour les feuilles, dès que **deux lignes partagent une même val
 
 `tests/test.js` pilote un Chromium réel : import, typage, annulation, concurrence entre
 onglets, quota, encodage, injection CSV, noms de feuille, colonnes calculées et
-regroupements proposés — 54 vérifications.
+regroupements proposés, mois en lettres, classements, nettoyage des espaces —
+70 vérifications.
 
 `tests/test-sans-librairie.js` rejoue le parcours du débutant : page ouverte sans la
 librairie, fichier désigné à la main, page tout-en-un enregistrée depuis le navigateur,
@@ -391,10 +420,14 @@ a preview over the first rows:
 - two date columns → number of **days**, **months** or **years** between them (the “start”
   column is recognised by its label, otherwise by the direction of the gaps);
 - two **year** columns (integers 1900–2100) → difference in years;
-- one date → year, month (YYYY-MM), quarter, age in days;
+- one date → year, **month spelled out** (“août”), month and year spelled out
+  (“août 2025”), month as YYYY-MM for correct sorting, quarter, age in days;
 - two numbers → difference, percentage, and product when the labels look like a quantity and
   a price;
-- one number → share of the sheet total;
+- a number column → **share in %** (the parts add up to 100) and a **ranking**: 1 for the
+  largest value, ties sharing their rank;
+- a number column plus a categorical one → **ranking within each group**, restarting at 1
+  for each city, team or category;
 - text → e-mail domain, concatenation of two columns.
 
 A computed column **recalculates itself** whenever its sources change, follows renames, and
@@ -408,6 +441,17 @@ Same idea for sheets, as soon as **two rows share a value**:
 - a summary sheet: one row per value, with row counts and sums of the numeric columns;
 - a summary by year or by month of a date column;
 - merging sheets that share the same structure, with an added “source sheet” column.
+
+### Whitespace cleanup
+
+A space at the edge of a cell, or doubled between two words, is invisible yet splits
+“Paris” from “Paris  ” in sorts, searches and groupings. The page spots them on its own
+after an import or a restore and offers to remove them, with a count per sheet and a
+before/after preview of the first twelve. The **“Nettoyer”** button in the sheet bar runs
+the check again on demand. The cleanup goes through the history, so **Ctrl+Z undoes it**.
+
+Two rules only: leading and trailing spaces go, runs of two or more spaces become one.
+Line breaks inside a cell are left alone, and numbers and dates are never touched.
 
 ### Known limits
 
@@ -423,7 +467,8 @@ Same idea for sheets, as soon as **two rows share a value**:
 ### Tests
 
 `tests/test.js` drives a real Chromium: import, typing, undo, concurrent tabs, quota,
-encoding, CSV injection, sheet names, computed columns and suggested groupings — 54 checks.
+encoding, CSV injection, sheet names, computed columns, suggested groupings, spelled-out months, rankings and whitespace
+cleanup — 70 checks.
 
 ```sh
 npm install playwright xlsx     # xlsx only builds the test fixtures

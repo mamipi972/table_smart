@@ -76,6 +76,8 @@ function check(name, cond, extra) {
   check('code postal conserve 01234', a.row0['Code postal'] === '01234', a.row0['Code postal']);
   check('telephone conserve 0612345678', a.row0['Telephone'] === '0612345678', a.row0['Telephone']);
   check('identifiant long garde en texte', a.cols.some(c => c.startsWith('Identifiant:text')), a.cols);
+  check('CP sans zero initial garde en texte grace a son intitule',
+    a.cols.includes('CP livraison:text(intitulé de code)'), a.cols);
   check('dates typees date', a.cols.includes('Date de debut:date') && a.cols.includes('Date de fin:date'), a.cols);
   check('date convertie en ISO', a.row0['Date de debut'] === '2025-01-10', a.row0['Date de debut']);
   check('montant numerique', a.cols.includes('Montant:number'), a.cols);
@@ -286,6 +288,74 @@ function check(name, cond, extra) {
   console.log('  ' + JSON.stringify(entetes));
   check('les en-tetes deviennent des colonnes meme sans donnees',
     !!entetes && entetes.cols.join(',') === 'Nom,Ville,Montant' && entetes.lignes === 0, entetes);
+
+  console.log('\n== O. mois en lettres, rangs, repartition ==');
+  await page.selectOption('#sheetSelect', 'Clients');
+  await page.click('#addColumn');
+  await page.waitForSelector('#columnDialog[open]');
+  const sugg4 = await page.$$eval('#colSuggestions .sugg-main h4', ns => ns.map(n => n.textContent));
+  console.log('  ' + sugg4.join(' / '));
+  check('mois en lettres propose', sugg4.some(t => /Mois de Date de debut en lettres/.test(t)), sugg4);
+  check('mois et annee en lettres proposes', sugg4.some(t => /Mois et année de Date de debut en lettres/.test(t)), sugg4);
+  check('rang propose', sugg4.some(t => /^Rang selon Montant$/.test(t)), sugg4);
+  check('rang par groupe propose', sugg4.some(t => /Rang selon Montant par Ville/.test(t)), sugg4);
+  check('repartition en % proposee', sugg4.some(t => /Répartition en % de Montant/.test(t)), sugg4);
+
+  const iMois = sugg4.findIndex(t => /Mois de Date de debut en lettres/.test(t));
+  if (iMois < 0) { check('mois en lettres cliquable', false, sugg4); }
+  else { await page.$$eval('#colSuggestions .sugg-actions button', (bs, i) => bs[i].click(), iMois); }
+  await page.waitForTimeout(200);
+  const mois = await page.evaluate(() => {
+    const sh = sheets['Clients'];
+    const col = sh.columns.find(c => c.formula && c.formula.op === 'moisLettres');
+    return col ? sh.rows.map(r => r[col.key]) : null;
+  });
+  console.log('  ' + JSON.stringify(mois));
+  check('mois ecrits en toutes lettres', !!mois && mois[0] === 'janvier' && mois[2] === 'mai', mois);
+
+  const rangs = await page.evaluate(() => {
+    const sh = sheets['Clients'];
+    const cle = addColumn('Rang', 'number', sh.columns.length - 1, { op: 'rang', args: { a: 'Montant' } });
+    const cle2 = addColumn('Rang ville', 'number', sh.columns.length - 1, { op: 'rangParGroupe', args: { a: 'Montant', b: 'Ville' } });
+    const part = addColumn('Part', 'number', sh.columns.length - 1, { op: 'partDuTotal', args: { a: 'Montant' } });
+    return {
+      montants: sh.rows.map(r => r['Montant']),
+      rang: sh.rows.map(r => r[cle]),
+      rangVille: sh.rows.map(r => r[cle2]),
+      part: sh.rows.map(r => r[part])
+    };
+  });
+  console.log('  ' + JSON.stringify(rangs));
+  // montants : 120.5, 80, 240, 15.75, 999.99
+  check('rang decroissant sur toute la feuille', rangs.rang.join(',') === '3,4,2,5,1', rangs.rang);
+  // Paris : 240 puis 120.5 ; Lyon : 80 puis 15.75 ; Nantes : 999.99 seul
+  check('rang reparti par ville', rangs.rangVille.join(',') === '2,1,1,2,1', rangs.rangVille);
+  check('repartition en % qui totalise 100', Math.abs(rangs.part.reduce((t, n) => t + n, 0) - 100) < 0.2, rangs.part);
+
+  console.log('\n== P. nettoyage des espaces ==');
+  const avant = await page.evaluate(() => ({
+    banniere: document.getElementById('cleanBanner').style.display,
+    texte: document.getElementById('cleanText').textContent,
+    villes: sheets['Clients'].rows.map(r => r['Ville brute'])
+  }));
+  console.log('  ' + JSON.stringify(avant.villes));
+  check('les espaces superflus sont reperes tout seuls', avant.banniere === 'flex', avant.banniere);
+  check('le bandeau dit combien de cellules', /cellule\(s\) portent des espaces superflus/.test(avant.texte), avant.texte);
+  await page.click('#cleanBtn');
+  await page.click('#cleanRunBtn');
+  await page.waitForTimeout(200);
+  const apres = await page.evaluate(() => ({
+    villes: sheets['Clients'].rows.map(r => r['Ville brute']),
+    banniere: document.getElementById('cleanBanner').style.display
+  }));
+  console.log('  ' + JSON.stringify(apres.villes));
+  check('espaces de bord supprimes', apres.villes[0] === 'Paris' && apres.villes[3] === 'Lyon' && apres.villes[4] === 'Nantes', apres.villes);
+  check('espaces doubles ramenes a un seul', apres.villes[1] === 'Lyon Centre', apres.villes[1]);
+  check('bandeau referme apres nettoyage', apres.banniere === 'none', apres.banniere);
+  await page.click('#undoBtn');
+  await page.waitForTimeout(200);
+  const annule = await page.evaluate(() => sheets['Clients'].rows.map(r => r['Ville brute']));
+  check('nettoyage annulable par Ctrl+Z', annule[0] === '  Paris ' && annule[1] === 'Lyon  Centre', annule);
 
   console.log('\n== M. pas de requete reseau externe ==');
   const page3 = await ctx.newPage();

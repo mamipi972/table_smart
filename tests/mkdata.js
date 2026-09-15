@@ -9,13 +9,15 @@ const at = name => path.join(out, name);
 
 function d(s) { const p = s.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]); }
 
-const header = ['Nom', 'Code postal', 'Telephone', 'Identifiant', 'Date de debut', 'Date de fin', 'Montant', 'Ville', 'Email', '__proto__'];
+// « CP livraison » n'a aucun zero initial : seul son intitule dit que ce n'est
+// pas une quantite. « Ville brute » porte les espaces superflus a nettoyer.
+const header = ['Nom', 'Code postal', 'Telephone', 'Identifiant', 'Date de debut', 'Date de fin', 'Montant', 'Ville', 'Email', '__proto__', 'CP livraison', 'Ville brute'];
 const rows = [
-  ['Durand', 1234, 612345678, 12345678901234567890, d('2025-01-10'), d('2025-03-15'), 120.5, 'Paris', 'a@exemple.fr', 'x1'],
-  ['Martin', 75001, 698765432, 22345678901234567890, d('2024-02-01'), d('2025-02-01'), 80, 'Lyon', 'b@exemple.fr', 'x2'],
-  ['Petit', 69003, 611223344, 32345678901234567890, d('2023-05-20'), d('2026-06-30'), 240, 'Paris', 'c@autre.com', 'x3'],
-  ['Robert', 44000, 655443322, 42345678901234567890, d('2025-07-01'), d('2025-07-20'), 15.75, 'Lyon', 'd@exemple.fr', 'x4'],
-  ['Simon', 1234, 600000000, 52345678901234567890, d('2022-12-31'), d('2025-12-31'), 999.99, 'Nantes', 'e@autre.com', 'x5']
+  ['Durand', 1234, 612345678, 12345678901234567890, d('2025-01-10'), d('2025-03-15'), 120.5, 'Paris', 'a@exemple.fr', 'x1', 75001, '  Paris '],
+  ['Martin', 75001, 698765432, 22345678901234567890, d('2024-02-01'), d('2025-02-01'), 80, 'Lyon', 'b@exemple.fr', 'x2', 69003, 'Lyon  Centre'],
+  ['Petit', 69003, 611223344, 32345678901234567890, d('2023-05-20'), d('2026-06-30'), 240, 'Paris', 'c@autre.com', 'x3', 44000, 'Paris'],
+  ['Robert', 44000, 655443322, 42345678901234567890, d('2025-07-01'), d('2025-07-20'), 15.75, 'Lyon', 'd@exemple.fr', 'x4', 75001, ' Lyon'],
+  ['Simon', 1234, 600000000, 52345678901234567890, d('2022-12-31'), d('2025-12-31'), 999.99, 'Nantes', 'e@autre.com', 'x5', 69003, 'Nantes ']
 ];
 
 const ws = XLSX.utils.aoa_to_sheet([header].concat(rows), { cellDates: true });

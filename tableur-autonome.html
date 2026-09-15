@@ -25,7 +25,7 @@
 -->
 <!-- DEBUT chargement de la librairie -->
 <script>
-  /* Librairie SheetJS 0.20.3 intégrée le 2026-09-14
+  /* Librairie SheetJS 0.20.3 intégrée le 2026-09-15
      par outils/integrer-xlsx.js. Cette page ne charge aucun fichier extérieur. */
   window.__xlsxInline = true;
   window.__xlsxLoadError = false;
@@ -290,6 +290,14 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
         <button class="btn-quiet" id="discardBtn">Repartir de zéro</button>
       </div>
 
+      <!-- espaces superflus repérés dans les données -->
+      <div class="banner" id="cleanBanner">
+        <span class="banner-text" id="cleanText"></span>
+        <button class="btn-primary" id="cleanRunBtn">Nettoyer</button>
+        <button class="btn-quiet" id="cleanShowBtn">Voir le détail</button>
+        <button class="btn-quiet" id="cleanCloseBtn">Ignorer</button>
+      </div>
+
       <!-- compte rendu du dernier import -->
       <div class="banner info" id="noteBanner">
         <span class="banner-text" id="noteText"></span>
@@ -303,6 +311,7 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
           <button class="btn-quiet btn-icon" id="renameSheet">Renommer</button>
           <button class="btn-danger btn-icon" id="deleteSheet">Supprimer</button>
           <button class="btn-quiet btn-icon" id="addColumn">+ Colonne</button>
+          <button class="btn-quiet btn-icon" id="cleanBtn" title="Supprimer les espaces en trop dans cette feuille">Nettoyer</button>
           <input type="text" id="searchInput" class="search" placeholder="Rechercher dans cette feuille">
         </div>
       </div>
@@ -589,6 +598,14 @@ let autosaveOff = false;  // un autre onglet tient le verrou : on n'écrase pas 
 let heldLocks = [];
 let pendingImport = null; // fichier analysé, en attente du choix de l'utilisateur
 
+/* Un code postal, un téléphone ou un SIRET s'écrivent avec des chiffres sans
+   être des nombres : les additionner n'a aucun sens, et le passage en nombre
+   leur coûte leur zéro initial. L'intitulé suffit à les reconnaître. */
+const TEXT_KEYWORDS = ['code postal', 'codepostal', 'cp', 'zip', 'postal', 'téléphone', 'telephone',
+  'tél', 'tel', 'portable', 'mobile', 'fax', 'siret', 'siren', 'iban', 'bic', 'rib',
+  'numéro', 'numero', 'n°', 'réf', 'ref', 'référence', 'reference', 'identifiant', 'id',
+  'matricule', 'immatriculation', 'ean', 'isbn', 'nir', 'insee', 'code'];
+
 const DATE_KEYWORDS = ['date','jour','début','debut','fin','échéance','echeance','création','creation',
   'maj','naissance','sortie','entrée','entree','anniversaire','expiration','péremption','peremption'];
 
@@ -624,6 +641,12 @@ function el(tag, cls, text) {
   return n;
 }
 function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+/* Comparaison par mots entiers : « CP » doit correspondre, « acompte » non. */
+function nameHasWord(key, words) {
+  const k = ' ' + String(key).toLowerCase().replace(/[^\p{L}\p{N}°]+/gu, ' ').trim() + ' ';
+  return words.some(w => k.indexOf(' ' + w + ' ') !== -1);
+}
 function p2(n) { return String(n).padStart(2, '0'); }
 
 function isoFromDate(d) {                       // sans décalage de fuseau
@@ -1318,17 +1341,18 @@ function sanitizeKeys(rows) {
 function detectColumns(rows, textRows, headers) {
   const stats = new Map();
   // les en-têtes fixent la liste et l'ordre des colonnes, même sans une seule ligne
-  (headers || []).forEach(h => stats.set(String(h), { date: 0, num: 0, text: 0, serial: 0, longDec: 0, zero: 0, big: 0 }));
+  (headers || []).forEach(h => stats.set(String(h), { date: 0, num: 0, text: 0, serial: 0, longDec: 0, zero: 0, big: 0, decimal: 0 }));
   rows.forEach((row, i) => {
     const trow = (textRows && textRows[i]) || null;
     Object.keys(row).forEach(key => {
-      if (!stats.has(key)) stats.set(key, { date: 0, num: 0, text: 0, serial: 0, longDec: 0, zero: 0, big: 0 });
+      if (!stats.has(key)) stats.set(key, { date: 0, num: 0, text: 0, serial: 0, longDec: 0, zero: 0, big: 0, decimal: 0 });
       const s = stats.get(key), v = row[key];
       const t = trow ? trow[key] : undefined;
       if (v === '' || v === null || v === undefined) return;
       if (v instanceof Date) { s.date++; return; }
       if (typeof v === 'number') {
         s.num++;
+        if (!Number.isInteger(v)) s.decimal++;
         if (v > 20000 && v < 80000) s.serial++;
         const dec = String(v).split('.')[1];
         if (dec && dec.length > 4) s.longDec++;
@@ -1340,6 +1364,7 @@ function detectColumns(rows, textRows, headers) {
       const str = String(v).trim();
       if (ISO_RE.test(str) || FR_RE.test(str)) { s.date++; return; }
       if (NUM_RE.test(str) || NUM_SPACED_RE.test(str)) {
+        if (/[.,]/.test(str)) s.decimal++;
         if (hasLeadingZero(str)) { s.zero++; s.text++; }        // code postal, téléphone…
         else if (tooManyDigits(str)) { s.big++; s.text++; }     // identifiant trop long pour un nombre
         else s.num++;
@@ -1351,8 +1376,10 @@ function detectColumns(rows, textRows, headers) {
 
   return Array.from(stats.entries()).map(([key, s]) => {
     let type = 'text', guard = '';
-    if (s.zero > 0 || s.big > 0) {
-      guard = s.zero > 0 ? 'zéro initial' : 'plus de 15 chiffres';
+    // un intitulé de code ne vaut que pour des entiers : « Montant TVA » reste un nombre
+    const codeParNom = nameHasWord(key, TEXT_KEYWORDS) && s.date === 0 && s.decimal === 0;
+    if (s.zero > 0 || s.big > 0 || (codeParNom && s.num > 0)) {
+      guard = s.zero > 0 ? 'zéro initial' : s.big > 0 ? 'plus de 15 chiffres' : 'intitulé de code';
       type = 'text';
     } else {
       const kw = DATE_KEYWORDS.some(k => String(key).toLowerCase().includes(k));
@@ -1502,6 +1529,50 @@ const FORMULAS = {
     label: a => 'Mois de « ' + a.a + ' » (AAAA-MM)',
     compute: (row, a) => { const d = toDate(cellValue(row, a.a)); return d ? d.getFullYear() + '-' + p2(d.getMonth() + 1) : ''; }
   },
+  moisLettres: {
+    type: 'text',
+    label: a => 'Mois de « ' + a.a + ' » en toutes lettres',
+    compute: (row, a) => {
+      const d = toDate(cellValue(row, a.a));
+      return d ? MOIS_FR[d.getMonth()] : '';
+    }
+  },
+  moisAnneeLettres: {
+    type: 'text',
+    label: a => 'Mois et année de « ' + a.a + ' » en toutes lettres',
+    compute: (row, a) => {
+      const d = toDate(cellValue(row, a.a));
+      return d ? MOIS_FR[d.getMonth()] + ' ' + d.getFullYear() : '';
+    }
+  },
+  rang: {
+    type: 'number',
+    label: a => 'Rang selon « ' + a.a + ' », du plus grand au plus petit',
+    context: (sh, a) => ({ rangs: classement(sh.rows, a.a, null) }),
+    compute: (row, a, ctx) => {
+      const n = numberOf(cellValue(row, a.a));
+      return (n === null || !ctx) ? '' : (ctx.rangs.get(cleRang('', n)) || '');
+    }
+  },
+  rangCroissant: {
+    type: 'number',
+    label: a => 'Rang selon « ' + a.a + ' », du plus petit au plus grand',
+    context: (sh, a) => ({ rangs: classement(sh.rows, a.a, null, true) }),
+    compute: (row, a, ctx) => {
+      const n = numberOf(cellValue(row, a.a));
+      return (n === null || !ctx) ? '' : (ctx.rangs.get(cleRang('', n)) || '');
+    }
+  },
+  rangParGroupe: {
+    type: 'number',
+    label: a => 'Rang selon « ' + a.a + ' » à l\'intérieur de chaque « ' + a.b + ' »',
+    context: (sh, a) => ({ rangs: classement(sh.rows, a.a, a.b) }),
+    compute: (row, a, ctx) => {
+      const n = numberOf(cellValue(row, a.a));
+      if (n === null || !ctx) return '';
+      return ctx.rangs.get(cleRang(String(cellValue(row, a.b) ?? '').trim(), n)) || '';
+    }
+  },
   trimestreDe: {
     type: 'text',
     label: a => 'Trimestre de « ' + a.a + ' »',
@@ -1534,7 +1605,7 @@ const FORMULAS = {
   },
   partDuTotal: {
     type: 'number',
-    label: a => 'Part de « ' + a.a + ' » dans le total de la feuille (%)',
+    label: a => 'Répartition en % : part de « ' + a.a + ' » dans le total de la colonne',
     context: (sh, a) => {
       let total = 0;
       sh.rows.forEach(r => { const n = numberOf(cellValue(r, a.a)); if (n !== null) total += n; });
@@ -1568,6 +1639,33 @@ const FORMULAS = {
     compute: (row, a) => { const s = String(cellValue(row, a.a) ?? ''); return s === '' ? '' : s.length; }
   }
 };
+
+const MOIS_FR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+  'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+
+function cleRang(groupe, valeur) { return groupe + '\u0000' + valeur; }
+
+/* Classement à la manière sportive : deux ex æquo partagent le rang, et le
+   suivant reprend après eux (1, 2, 2, 4). Un groupe repart de 1. */
+function classement(rows, cle, cleGroupe, croissant) {
+  const paquets = new Map();
+  rows.forEach(r => {
+    const n = numberOf(cellValue(r, cle));
+    if (n === null) return;
+    const g = cleGroupe ? String(cellValue(r, cleGroupe) ?? '').trim() : '';
+    if (!paquets.has(g)) paquets.set(g, []);
+    paquets.get(g).push(n);
+  });
+  const rangs = new Map();
+  paquets.forEach((valeurs, g) => {
+    valeurs.sort((x, y) => croissant ? x - y : y - x);
+    valeurs.forEach((v, i) => {
+      const cleV = cleRang(g, v);
+      if (!rangs.has(cleV)) rangs.set(cleV, i + 1);
+    });
+  });
+  return rangs;
+}
 
 function computedColumn(col) { return !!(col && col.formula && FORMULAS[col.formula.op]); }
 
@@ -1666,7 +1764,8 @@ function collectNotes(notes, sheetName, built) {
   if (built.guarded.length) {
     notes.push('Feuille « ' + sheetName + ' » : ' + built.guarded.map(k => '« ' + k + ' »').join(', ') +
       ' ' + (built.guarded.length > 1 ? 'ont été gardées' : 'a été gardée') +
-      ' en type texte (zéro initial ou identifiant trop long) pour ne pas abîmer les valeurs.');
+      ' en type texte (zéro initial, identifiant trop long, ou intitulé désignant un code) ' +
+      'pour ne pas abîmer les valeurs. Le menu « ⋮ » permet de revenir sur ce choix.');
   }
   if (built.renamed.length) {
     notes.push('Feuille « ' + sheetName + ' » : colonne(s) renommée(s) ' + built.renamed.join(', ') +
@@ -1739,6 +1838,7 @@ function applyImport(mode) {
   refreshSheetSelect(mode !== 'merge');
   $('sheetSelect').value = currentSheet;
   showNotes(parsed.notes);
+  proposeClean(Object.keys(sheets), true);
   buildForm(); render(); scheduleSave();
 }
 
@@ -1886,6 +1986,85 @@ function exportJournalCsv() {
     lines.push([new Date(e.ts).toLocaleString('fr-FR'), e.sheet, kindLabel(e.kind), e.text].map(q).join(sep));
   });
   downloadText('journal_modifications_' + stamp() + '.csv', '\uFEFF' + lines.join('\r\n'));
+}
+
+/* =====================================================================
+   9 bis. Nettoyage des espaces
+   ===================================================================== */
+
+/* Deux fautes de frappe courantes, invisibles à l'œil : des espaces au bord
+   d'une cellule, et des espaces multiples entre deux mots. Elles cassent les
+   tris, les recherches et les regroupements — « Paris » et « Paris  » comptent
+   pour deux villes. Les retours à la ligne, eux, sont laissés en place. */
+function cleanValue(v) {
+  if (typeof v !== 'string') return v;
+  return v.replace(/[^\S\r\n]{2,}/g, ' ').replace(/^[\s\u00A0]+|[\s\u00A0]+$/g, '');
+}
+
+function scanSpaces(names) {
+  const found = { count: 0, cells: [], sheets: [] };
+  names.forEach(name => {
+    const sh = sheets[name];
+    if (!sh) return;
+    let dansCetteFeuille = 0;
+    sh.rows.forEach((row, i) => {
+      sh.columns.forEach(col => {
+        const v = cellValue(row, col.key);
+        if (typeof v !== 'string' || v === '') return;
+        const propre = cleanValue(v);
+        if (propre === v) return;
+        found.count++; dansCetteFeuille++;
+        if (found.cells.length < 12) found.cells.push({ sheet: name, line: i + 1, col: col.key, before: v, after: propre });
+      });
+    });
+    if (dansCetteFeuille) found.sheets.push(name + ' (' + dansCetteFeuille + ')');
+  });
+  return found;
+}
+
+let cleanTarget = [];
+
+function proposeClean(names, quiet) {
+  const found = scanSpaces(names);
+  cleanTarget = names;
+  if (!found.count) {
+    $('cleanBanner').style.display = 'none';
+    if (!quiet) alert('Rien à nettoyer : aucune cellule ne commence ni ne finit par un espace, et aucune ne contient deux espaces de suite.');
+    return found;
+  }
+  $('cleanText').textContent = found.count + ' cellule(s) portent des espaces superflus — ' +
+    found.sheets.join(', ') + '. Un espace au bord d\'une cellule ou doublé entre deux mots ne se voit pas, ' +
+    'mais sépare « Paris » de « Paris  » dans les tris et les regroupements. Le nettoyage reste annulable par Ctrl+Z.';
+  $('cleanBanner').style.display = 'flex';
+  return found;
+}
+
+function showCleanDetail() {
+  const found = scanSpaces(cleanTarget);
+  if (!found.count) { alert('Plus rien à nettoyer.'); return; }
+  const lignes = found.cells.map(c =>
+    '[' + c.sheet + '] ligne ' + c.line + ', « ' + c.col + ' »\n   « ' + c.before + ' »  →  « ' + c.after + ' »');
+  alert(found.count + ' cellule(s) à nettoyer' + (found.count > lignes.length ? ', dont les ' + lignes.length + ' premières :' : ' :') +
+    '\n\n' + lignes.join('\n'));
+}
+
+function runClean() {
+  const found = scanSpaces(cleanTarget);
+  if (!found.count) { $('cleanBanner').style.display = 'none'; alert('Plus rien à nettoyer.'); return; }
+  mutate('edit', 'Espaces superflus supprimés dans ' + found.count + ' cellule(s) — ' + found.sheets.join(', '), () => {
+    cleanTarget.forEach(name => {
+      const sh = sheets[name];
+      if (!sh) return;
+      sh.rows.forEach(row => {
+        sh.columns.forEach(col => {
+          const v = cellValue(row, col.key);
+          if (typeof v === 'string' && v !== '') row[col.key] = cleanValue(v);
+        });
+      });
+    });
+  });
+  $('cleanBanner').style.display = 'none';
+  buildForm(); render();
 }
 
 /* =====================================================================
@@ -2173,6 +2352,24 @@ function suggestionPreview(sh, formula) {
   return out;
 }
 
+function entrelacerFamilles(list, max) {
+  const familles = new Map();
+  list.forEach(item => {
+    const f = item.fam || 'autre';
+    if (!familles.has(f)) familles.set(f, []);
+    familles.get(f).push(item);
+  });
+  const files = Array.from(familles.values()), out = [];
+  let reste = true;
+  while (out.length < max && reste) {
+    reste = false;
+    for (let i = 0; i < files.length && out.length < max; i++) {
+      if (files[i].length) { out.push(files[i].shift()); reste = true; }
+    }
+  }
+  return out;
+}
+
 function buildColumnSuggestions(sh) {
   const out = [];
   const dates = columnsOfType(sh, 'date');
@@ -2194,11 +2391,11 @@ function buildColumnSuggestions(sh) {
   datePairs.sort((x, y) => y.covered - x.covered);
   datePairs.slice(0, 4).forEach(p => {
     const args = { a: p.a, b: p.b };
-    out.push({ op: 'joursEntre', args: args, name: 'Jours entre ' + p.a + ' et ' + p.b,
+    out.push({ fam: 'duree', op: 'joursEntre', args: args, name: 'Jours entre ' + p.a + ' et ' + p.b,
       why: p.covered + ' ligne(s) ont les deux dates renseignées.' });
-    if (p.gap > 55) out.push({ op: 'moisEntre', args: args, name: 'Mois entre ' + p.a + ' et ' + p.b,
+    if (p.gap > 55) out.push({ fam: 'duree', op: 'moisEntre', args: args, name: 'Mois entre ' + p.a + ' et ' + p.b,
       why: 'L\'écart moyen est de ' + Math.round(p.gap) + ' jours : le mois est plus lisible.' });
-    if (p.gap > 400) out.push({ op: 'anneesEntre', args: args, name: 'Années entre ' + p.a + ' et ' + p.b,
+    if (p.gap > 400) out.push({ fam: 'duree', op: 'anneesEntre', args: args, name: 'Années entre ' + p.a + ' et ' + p.b,
       why: 'L\'écart moyen dépasse un an.' });
   });
 
@@ -2206,21 +2403,25 @@ function buildColumnSuggestions(sh) {
   for (let i = 0; i < years.length; i++) {
     for (let j = i + 1; j < years.length; j++) {
       const ordered = [years[i], years[j]];
-      out.push({ op: 'ecartAnnees', args: { a: ordered[0].key, b: ordered[1].key },
+      out.push({ fam: 'annees', op: 'ecartAnnees', args: { a: ordered[0].key, b: ordered[1].key },
         name: 'Écart en années entre ' + ordered[0].key + ' et ' + ordered[1].key,
         why: 'Deux colonnes d\'années ont été repérées.' });
     }
   }
 
-  // 3. une seule date : année, mois, trimestre, ancienneté
-  dates.slice(0, 3).forEach(col => {
+  // 3. une seule date : année, mois en lettres, mois triable, trimestre, ancienneté
+  dates.slice(0, 2).forEach(col => {
     const filled = filledCount(sh, col.key);
     if (!filled) return;
-    out.push({ op: 'anneeDe', args: { a: col.key }, name: 'Année de ' + col.key, why: 'Utile pour regrouper ou faire une synthèse.' });
-    out.push({ op: 'moisDe', args: { a: col.key }, name: 'Mois de ' + col.key, why: 'Format AAAA-MM, qui se trie correctement.' });
-    out.push({ op: 'trimestreDe', args: { a: col.key }, name: 'Trimestre de ' + col.key, why: 'Regroupement par trimestre.' });
+    out.push({ fam: 'date:' + col.key, op: 'anneeDe', args: { a: col.key }, name: 'Année de ' + col.key, why: 'Utile pour regrouper ou faire une synthèse.' });
+    out.push({ fam: 'date:' + col.key, op: 'moisLettres', args: { a: col.key }, name: 'Mois de ' + col.key + ' en lettres',
+      why: 'Donne « août », « septembre ». Se lit d\'un coup d\'œil, mais se trie par ordre alphabétique.' });
+    out.push({ fam: 'date:' + col.key, op: 'moisAnneeLettres', args: { a: col.key }, name: 'Mois et année de ' + col.key + ' en lettres',
+      why: 'Donne « août 2025 », pour distinguer deux mois de même nom.' });
+    out.push({ fam: 'date:' + col.key, op: 'moisDe', args: { a: col.key }, name: 'Mois de ' + col.key + ' (AAAA-MM)', why: 'Le même mois, mais dans un format qui se trie correctement.' });
+    out.push({ fam: 'date:' + col.key, op: 'trimestreDe', args: { a: col.key }, name: 'Trimestre de ' + col.key, why: 'Regroupement par trimestre.' });
     if (score(col.key, END_WORDS) === 0)
-      out.push({ op: 'joursDepuis', args: { a: col.key }, name: 'Ancienneté en jours depuis ' + col.key,
+      out.push({ fam: 'date:' + col.key, op: 'joursDepuis', args: { a: col.key }, name: 'Ancienneté en jours depuis ' + col.key,
         why: 'Calculé par rapport à aujourd\'hui, recalculé à chaque modification.' });
   });
 
@@ -2230,30 +2431,43 @@ function buildColumnSuggestions(sh) {
       const a = plainNumbers[i].key, b = plainNumbers[j].key;
       const qty = /quantit|nombre|nb|qte|qté|unit/i;
       const price = /prix|tarif|montant|coût|cout|unitaire|pu\b/i;
-      if (qty.test(a) && price.test(b)) out.push({ op: 'produit', args: { a: a, b: b }, name: a + ' × ' + b, why: 'Une quantité et un prix : le total par ligne.' });
-      else if (qty.test(b) && price.test(a)) out.push({ op: 'produit', args: { a: b, b: a }, name: b + ' × ' + a, why: 'Une quantité et un prix : le total par ligne.' });
-      out.push({ op: 'difference', args: { a: a, b: b }, name: b + ' − ' + a, why: 'Écart entre les deux colonnes.' });
-      out.push({ op: 'pourcentage', args: { a: a, b: b }, name: a + ' en % de ' + b, why: 'Proportion d\'une colonne par rapport à l\'autre.' });
+      if (qty.test(a) && price.test(b)) out.push({ fam: 'nombres', op: 'produit', args: { a: a, b: b }, name: a + ' × ' + b, why: 'Une quantité et un prix : le total par ligne.' });
+      else if (qty.test(b) && price.test(a)) out.push({ fam: 'nombres', op: 'produit', args: { a: b, b: a }, name: b + ' × ' + a, why: 'Une quantité et un prix : le total par ligne.' });
+      out.push({ fam: 'nombres', op: 'difference', args: { a: a, b: b }, name: b + ' − ' + a, why: 'Écart entre les deux colonnes.' });
+      out.push({ fam: 'nombres', op: 'pourcentage', args: { a: a, b: b }, name: a + ' en % de ' + b, why: 'Proportion d\'une colonne par rapport à l\'autre.' });
     }
   }
-  // 5. un seul nombre : part du total
-  plainNumbers.slice(0, 2).forEach(col => {
-    if (filledCount(sh, col.key) >= 2)
-      out.push({ op: 'partDuTotal', args: { a: col.key }, name: 'Part de ' + col.key + ' dans le total', why: 'Chaque ligne rapportée à la somme de la colonne.' });
+  // 5. une colonne de chiffres : répartition en %, et classement
+  const categories = categoryColumns(sh);
+  plainNumbers.slice(0, 3).forEach(col => {
+    const rempli = filledCount(sh, col.key);
+    if (rempli < 2) return;
+    out.push({ fam: 'stats', op: 'partDuTotal', args: { a: col.key }, name: 'Répartition en % de ' + col.key,
+      why: 'Chaque ligne rapportée à la somme de la colonne : les parts font 100 au total.' });
+    out.push({ fam: 'stats', op: 'rang', args: { a: col.key }, name: 'Rang selon ' + col.key,
+      why: 'Le 1 va à la plus grande valeur ; deux ex æquo partagent leur rang.' });
+    categories.slice(0, 1).forEach(cat => {
+      out.push({ fam: 'stats', op: 'rangParGroupe', args: { a: col.key, b: cat.col.key },
+        name: 'Rang selon ' + col.key + ' par ' + cat.col.key,
+        why: 'Un classement qui repart de 1 dans chaque « ' + cat.col.key + ' ».' });
+    });
   });
 
   // 6. texte
   const mail = texts.find(c => looksLikeEmail(sh, c.key));
-  if (mail) out.push({ op: 'domaineMail', args: { a: mail.key }, name: 'Domaine de ' + mail.key, why: 'Ces valeurs ressemblent à des adresses e-mail.' });
+  if (mail) out.push({ fam: 'texte', op: 'domaineMail', args: { a: mail.key }, name: 'Domaine de ' + mail.key, why: 'Ces valeurs ressemblent à des adresses e-mail.' });
   if (texts.length >= 2 && filledCount(sh, texts[0].key) && filledCount(sh, texts[1].key))
-    out.push({ op: 'concat', args: { a: texts[0].key, b: texts[1].key }, name: texts[0].key + ' et ' + texts[1].key + ' réunis',
+    out.push({ fam: 'texte', op: 'concat', args: { a: texts[0].key, b: texts[1].key }, name: texts[0].key + ' et ' + texts[1].key + ' réunis',
       why: 'Par exemple un prénom et un nom dans une seule colonne.' });
 
-  // on ne garde que les calculs qui produisent réellement quelque chose
-  return out.map(s => {
+  // On ne garde que les calculs qui produisent réellement quelque chose, et on
+  // sert une suggestion par famille à tour de rôle : sans cela, deux colonnes de
+  // date suffisent à remplir la liste et cachent tout le reste.
+  const utiles = out.map(s => {
     const preview = suggestionPreview(sh, { op: s.op, args: s.args });
     return Object.assign({}, s, { preview: preview });
-  }).filter(s => s.preview.length).slice(0, 12);
+  }).filter(s => s.preview.length);
+  return entrelacerFamilles(utiles, 16);
 }
 
 function openColumnDialog(afterIndex) {
@@ -2976,6 +3190,7 @@ function applySession(saved) {
   refreshSheetSelect();
   $('sheetSelect').value = currentSheet;
   claimDocument(fileLabel);
+  proposeClean(Object.keys(sheets), true);
   buildForm(); render(); renderJournal(); setStatus('saved', 'Session restaurée, enregistrée dans le navigateur');
 }
 
@@ -3068,6 +3283,11 @@ $('storageSessionsBtn').addEventListener('click', openSessions);
 $('storageExportBtn').addEventListener('click', openExportDialog);
 $('storageRetryBtn').addEventListener('click', saveLocal);
 $('noteCloseBtn').addEventListener('click', () => { $('noteBanner').style.display = 'none'; });
+
+$('cleanBtn').addEventListener('click', () => { if (currentSheet) proposeClean([currentSheet]); });
+$('cleanRunBtn').addEventListener('click', runClean);
+$('cleanShowBtn').addEventListener('click', showCleanDetail);
+$('cleanCloseBtn').addEventListener('click', () => { $('cleanBanner').style.display = 'none'; });
 
 $('pickLibBtn').addEventListener('click', () => $('libUpload').click());
 $('libUpload').addEventListener('change', function (e) {
