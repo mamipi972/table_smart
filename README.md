@@ -234,11 +234,41 @@ détectés, chacun avec un aperçu sur les premières lignes :
 - du texte → domaine d'une adresse e-mail, concaténation de deux colonnes.
 
 Les suggestions sont servies **une par famille à tour de rôle** : sans cela, deux
-colonnes de date suffisent à remplir la liste et masquent tout le reste.
+colonnes de date suffisent à remplir la liste et masquent tout le reste. Chacune affiche
+la formule tableur correspondante (voir ci-dessous).
 
 Une colonne calculée **se recalcule automatiquement** à chaque modification de ses
 sources, suit les renommages, et se fige en valeurs si sa source disparaît ou sur
 demande depuis le menu « ⋮ ».
+
+### La formule est toujours rappelée
+
+Chaque proposition affiche la **formule tableur** correspondante, telle qu'elle
+s'écrirait pour la ligne 2 : `=F2-E2`, `=IF(E2="";"";YEAR(E2))`,
+`=IF(SUM($G$2:$G$6)=0;"";G2/SUM($G$2:$G$6)*100)`. On la retrouve dans l'infobulle de
+l'en-tête, dans celle de chaque cellule calculée, et en entier par « Voir la formule »
+dans le menu « ⋮ » — avec le nom des colonnes sources.
+
+Les points-virgules correspondent à ce qu'affiche un Excel français : la formule se
+recopie telle quelle dans une cellule. Le fichier, lui, stocke la virgule et les noms de
+fonctions anglais, qu'Excel et LibreOffice traduisent à l'ouverture.
+
+### Exportées comme formules, pas comme valeurs
+
+À l'export **.xlsx** et **.ods**, les colonnes calculées partent en **vraies formules** :
+le classeur se recalcule tout seul à l'ouverture, et continue de vivre si on y ajoute des
+lignes. La valeur figée reste écrite à côté, pour les lecteurs qui n'évaluent rien. Une
+case de la fenêtre d'export permet de n'exporter que les valeurs.
+
+Le CSV ne connaît pas les formules : il reçoit toujours les valeurs, et les cellules
+commençant par `=` y sont neutralisées comme les autres.
+
+Trois réserves honnêtes. `TEXT(…;"mmmm")` rend le mois dans la langue de l'application :
+« août » en français, « August » sur un Excel anglais. Le domaine d'une adresse e-mail est
+pris après le **premier** `@` par la formule, après le dernier par la page — sans
+différence sur une adresse normale. Et `DATEDIF`, utilisée pour les écarts en mois et en
+années, existe dans Excel comme dans LibreOffice mais reste absente de leur liste de
+fonctions : elle fonctionne sans être proposée à la saisie.
 
 ## Feuilles proposées (bouton « + Feuille »)
 
@@ -283,7 +313,7 @@ d'une cellule sont laissés intacts, et les nombres comme les dates ne sont pas 
 `tests/test.js` pilote un Chromium réel : import, typage, annulation, concurrence entre
 onglets, quota, encodage, injection CSV, noms de feuille, colonnes calculées et
 regroupements proposés, mois en lettres, classements, nettoyage des espaces —
-70 vérifications.
+78 vérifications.
 
 `tests/test-sans-librairie.js` rejoue le parcours du débutant : page ouverte sans la
 librairie, fichier désigné à la main, page tout-en-un enregistrée depuis le navigateur,
@@ -433,6 +463,26 @@ a preview over the first rows:
 A computed column **recalculates itself** whenever its sources change, follows renames, and
 freezes into plain values if a source disappears or on request from the “⋮” menu.
 
+#### The formula is always shown
+
+Every suggestion displays the matching **spreadsheet formula** as it would be written for
+row 2 — `=F2-E2`, `=IF(E2="";"";YEAR(E2))` — and so do the header and cell tooltips, with
+“Voir la formule” in the “⋮” menu giving the full picture. Semicolons match what a French
+Excel displays; the file itself stores commas and English function names, which Excel and
+LibreOffice translate on opening.
+
+#### Exported as formulas, not as values
+
+In **.xlsx** and **.ods** exports, computed columns are written as **real formulas**: the
+workbook recalculates on opening and keeps working when rows are added, with the frozen
+value stored alongside for readers that evaluate nothing. A checkbox in the export dialog
+falls back to values only. CSV has no formulas and always receives values.
+
+Three honest caveats: `TEXT(…,"mmmm")` renders the month in the application's language;
+the e-mail domain formula splits on the **first** `@` where the page uses the last; and
+`DATEDIF`, used for month and year gaps, works in both Excel and LibreOffice but is absent
+from their function lists.
+
 ### Suggested sheets (the “+ Feuille” button)
 
 Same idea for sheets, as soon as **two rows share a value**:
@@ -468,7 +518,7 @@ Line breaks inside a cell are left alone, and numbers and dates are never touche
 
 `tests/test.js` drives a real Chromium: import, typing, undo, concurrent tabs, quota,
 encoding, CSV injection, sheet names, computed columns, suggested groupings, spelled-out months, rankings and whitespace
-cleanup — 70 checks.
+cleanup — 78 checks.
 
 ```sh
 npm install playwright xlsx     # xlsx only builds the test fixtures

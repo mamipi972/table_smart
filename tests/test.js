@@ -120,6 +120,9 @@ function check(name, cond, extra) {
   check('domaine e-mail propose', suggestions.some(t => /Domaine de Email/.test(t)), suggestions);
   const previews = await page.$$eval('#colSuggestions .preview', ns => ns.map(n => n.textContent));
   check('les apercus sont calcules', previews[0].includes('ligne 1'), previews[0]);
+  const formulesVues = await page.$$eval('#colSuggestions .formule', ns => ns.map(n => n.textContent));
+  check('la formule est rappelee dans le descriptif',
+    formulesVues.length > 0 && /Formule, pour la ligne 2 : =/.test(formulesVues[0]), formulesVues[0]);
   const idx = suggestions.findIndex(t => /Jours entre Date de debut et Date de fin/.test(t));
   if (idx < 0) { check('suggestion de duree cliquable', false, suggestions); }
   else { await page.$$eval('#colSuggestions .sugg-actions button', (bs, i) => bs[i].click(), idx); }
@@ -356,6 +359,59 @@ function check(name, cond, extra) {
   await page.waitForTimeout(200);
   const annule = await page.evaluate(() => sheets['Clients'].rows.map(r => r['Ville brute']));
   check('nettoyage annulable par Ctrl+Z', annule[0] === '  Paris ' && annule[1] === 'Lyon  Centre', annule);
+
+  console.log('\n== Q. formules conservees a l export ==');
+  const formules = await page.evaluate(() => {
+    const sh = sheets['Clients'];
+    // trois calculs aux formes differentes : soustraction, fonction, plage figee
+    addColumn('Duree', 'number', sh.columns.length - 1, { op: 'joursEntre', args: { a: 'Date de debut', b: 'Date de fin' } });
+    addColumn('Annee fin', 'number', sh.columns.length - 1, { op: 'anneeDe', args: { a: 'Date de fin' } });
+    addColumn('Poids', 'number', sh.columns.length - 1, { op: 'partDuTotal', args: { a: 'Montant' } });
+    const lire = format => {
+      const buf = XLSX.write(buildWorkbook(), { bookType: format, type: 'array' });
+      const relu = XLSX.read(buf, { type: 'array', cellFormula: true });
+      const ws = relu.Sheets[Object.keys(relu.Sheets)[0]];
+      const out = {};
+      Object.keys(ws).forEach(ref => { if (ws[ref] && ws[ref].f) out[ref] = ws[ref].f; });
+      return out;
+    };
+    const col = k => sh.columns.findIndex(c => c.key === k);
+    const lettre = i => { let s = '', n = i; while (n >= 0) { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } return s; };
+    return {
+      xlsx: lire('xlsx'),
+      ods: lire('ods'),
+      refDuree: lettre(col('Duree')) + '2',
+      refAnnee: lettre(col('Annee fin')) + '2',
+      refPoids: lettre(col('Poids')) + '2',
+      affichee: formuleAffichee(sh, sh.columns.find(c => c.key === 'Duree'), 2),
+      sansFormules: (() => {
+        document.getElementById('keepFormulas').checked = false;
+        const buf = XLSX.write(buildWorkbook(), { bookType: 'xlsx', type: 'array' });
+        document.getElementById('keepFormulas').checked = true;
+        const relu = XLSX.read(buf, { type: 'array', cellFormula: true });
+        const ws = relu.Sheets[Object.keys(relu.Sheets)[0]];
+        return Object.keys(ws).filter(ref => ws[ref] && ws[ref].f).length;
+      })()
+    };
+  });
+  console.log('  xlsx : ' + JSON.stringify(formules.xlsx[formules.refDuree]) + ' / ' +
+    JSON.stringify(formules.xlsx[formules.refPoids]));
+  console.log('  ods  : ' + JSON.stringify(formules.ods[formules.refDuree]));
+  console.log('  affichee : ' + formules.affichee);
+  check('xlsx : soustraction de dates ecrite en formule',
+    /^[A-Z]+2-[A-Z]+2$/.test(formules.xlsx[formules.refDuree] || ''), formules.xlsx[formules.refDuree]);
+  check('xlsx : fonction avec garde sur cellule vide',
+    /^IF\([A-Z]+2="","",YEAR\([A-Z]+2\)\)$/.test(formules.xlsx[formules.refAnnee] || ''), formules.xlsx[formules.refAnnee]);
+  check('xlsx : plage figee pour la repartition',
+    /SUM\(\$[A-Z]+\$2:\$[A-Z]+\$6\)/.test(formules.xlsx[formules.refPoids] || ''), formules.xlsx[formules.refPoids]);
+  const nbFormules = Object.keys(formules.xlsx).length;
+  check('xlsx : une formule par ligne et par colonne calculee',
+    nbFormules >= 15 && nbFormules % 5 === 0, nbFormules);
+  check('ods : les memes formules sont ecrites',
+    formules.ods[formules.refDuree] === formules.xlsx[formules.refDuree], formules.ods[formules.refDuree]);
+  check('case decochee : aucune formule, seulement les valeurs', formules.sansFormules === 0, formules.sansFormules);
+  check('formule affichee avec des points-virgules et un signe egal',
+    /^=[A-Z]+2-[A-Z]+2$/.test(formules.affichee), formules.affichee);
 
   console.log('\n== M. pas de requete reseau externe ==');
   const page3 = await ctx.newPage();

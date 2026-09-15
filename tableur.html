@@ -163,6 +163,8 @@
   .sugg-main h4 { margin:0 0 3px; font-size:13.5px; font-weight:600; }
   .sugg-main p { margin:0; font-size:12.5px; color:var(--ink-soft); white-space:normal; }
   .sugg-main .preview { margin-top:5px; font-size:12px; color:var(--ink-soft); font-variant-numeric:tabular-nums; white-space:normal; }
+  .sugg-main .formule { margin-top:5px; font-size:12px; color:var(--ink-soft); white-space:normal;
+    font-family:ui-monospace, 'Cascadia Mono', Consolas, 'Courier New', monospace; }
   .sugg-actions { flex:0 0 auto; display:flex; gap:6px; align-items:center; }
 
   .rows-table { width:100%; border-collapse:collapse; font-size:13px; }
@@ -518,10 +520,14 @@
         </select>
       </label>
       <label class="inline" title="Une cellule commençant par = + - @ est exécutée comme formule à l'ouverture dans Excel">
-        <input type="checkbox" id="csvNeutralize" checked> Neutraliser les formules (recommandé)
+        <input type="checkbox" id="csvNeutralize" checked> Neutraliser les formules du CSV (recommandé)
+      </label>
+      <label class="inline" title="Les colonnes calculées sont écrites comme formules, recalculées à l'ouverture">
+        <input type="checkbox" id="keepFormulas" checked> Conserver les colonnes calculées comme formules (.xlsx et .ods)
       </label>
     </div>
-    <p class="hint" id="exportNameHint" style="margin-top:10px"></p>
+    <p class="hint" id="formulaHint" style="margin-top:10px"></p>
+    <p class="hint" id="exportNameHint" style="margin-top:6px"></p>
   </div>
   <div class="modal-foot">
     <span class="hint">Les mises en forme et formules du fichier d'origine ne sont pas conservées.</span>
@@ -1467,21 +1473,25 @@ function round2(n) { return Math.round(n * 100) / 100; }
 
 const FORMULAS = {
   joursEntre: {
+    excel: r => r.b + '-' + r.a,
     type: 'number',
     label: a => 'Nombre de jours entre « ' + a.a + ' » et « ' + a.b + ' »',
     compute: (row, a) => { const d = twoDates(row, a); return d ? Math.round((d[1] - d[0]) / 86400000) : ''; }
   },
   moisEntre: {
+    excel: r => 'DATEDIF(' + r.a + ',' + r.b + ',"m")',
     type: 'number',
     label: a => 'Nombre de mois entiers entre « ' + a.a + ' » et « ' + a.b + ' »',
     compute: (row, a) => { const d = twoDates(row, a); return d ? monthsBetween(d[0], d[1]) : ''; }
   },
   anneesEntre: {
+    excel: r => 'DATEDIF(' + r.a + ',' + r.b + ',"y")',
     type: 'number',
     label: a => 'Nombre d\'années entières entre « ' + a.a + ' » et « ' + a.b + ' »',
     compute: (row, a) => { const d = twoDates(row, a); return d ? fullYearsBetween(d[0], d[1]) : ''; }
   },
   joursDepuis: {
+    excel: r => 'IF(' + r.a + '="","",TODAY()-' + r.a + ')',
     type: 'number',
     label: a => 'Nombre de jours écoulés depuis « ' + a.a + ' »',
     compute: (row, a) => {
@@ -1492,16 +1502,19 @@ const FORMULAS = {
     }
   },
   anneeDe: {
+    excel: r => 'IF(' + r.a + '="","",YEAR(' + r.a + '))',
     type: 'number',
     label: a => 'Année de « ' + a.a + ' »',
     compute: (row, a) => { const d = toDate(cellValue(row, a.a)); return d ? d.getFullYear() : ''; }
   },
   moisDe: {
+    excel: r => 'IF(' + r.a + '="","",TEXT(' + r.a + ',"yyyy-mm"))',
     type: 'text',
     label: a => 'Mois de « ' + a.a + ' » (AAAA-MM)',
     compute: (row, a) => { const d = toDate(cellValue(row, a.a)); return d ? d.getFullYear() + '-' + p2(d.getMonth() + 1) : ''; }
   },
   moisLettres: {
+    excel: r => 'IF(' + r.a + '="","",TEXT(' + r.a + ',"mmmm"))',
     type: 'text',
     label: a => 'Mois de « ' + a.a + ' » en toutes lettres',
     compute: (row, a) => {
@@ -1510,6 +1523,7 @@ const FORMULAS = {
     }
   },
   moisAnneeLettres: {
+    excel: r => 'IF(' + r.a + '="","",TEXT(' + r.a + ',"mmmm yyyy"))',
     type: 'text',
     label: a => 'Mois et année de « ' + a.a + ' » en toutes lettres',
     compute: (row, a) => {
@@ -1518,6 +1532,7 @@ const FORMULAS = {
     }
   },
   rang: {
+    excel: r => 'IF(' + r.a + '="","",RANK(' + r.a + ',' + r.plageA + '))',
     type: 'number',
     label: a => 'Rang selon « ' + a.a + ' », du plus grand au plus petit',
     context: (sh, a) => ({ rangs: classement(sh.rows, a.a, null) }),
@@ -1527,6 +1542,7 @@ const FORMULAS = {
     }
   },
   rangCroissant: {
+    excel: r => 'IF(' + r.a + '="","",RANK(' + r.a + ',' + r.plageA + ',1))',
     type: 'number',
     label: a => 'Rang selon « ' + a.a + ' », du plus petit au plus grand',
     context: (sh, a) => ({ rangs: classement(sh.rows, a.a, null, true) }),
@@ -1536,6 +1552,7 @@ const FORMULAS = {
     }
   },
   rangParGroupe: {
+    excel: r => 'SUMPRODUCT((' + r.plageB + '=' + r.b + ')*(' + r.plageA + '>' + r.a + '))+1',
     type: 'number',
     label: a => 'Rang selon « ' + a.a + ' » à l\'intérieur de chaque « ' + a.b + ' »',
     context: (sh, a) => ({ rangs: classement(sh.rows, a.a, a.b) }),
@@ -1546,36 +1563,43 @@ const FORMULAS = {
     }
   },
   trimestreDe: {
+    excel: r => 'IF(' + r.a + '="","","T"&ROUNDUP(MONTH(' + r.a + ')/3,0)&" "&YEAR(' + r.a + '))',
     type: 'text',
     label: a => 'Trimestre de « ' + a.a + ' »',
     compute: (row, a) => { const d = toDate(cellValue(row, a.a)); return d ? 'T' + (Math.floor(d.getMonth() / 3) + 1) + ' ' + d.getFullYear() : ''; }
   },
   ecartAnnees: {
+    excel: r => r.b + '-' + r.a,
     type: 'number',
     label: a => 'Écart en années entre « ' + a.a + ' » et « ' + a.b + ' »',
     compute: (row, a) => { const n = twoNumbers(row, a); return n ? n[1] - n[0] : ''; }
   },
   difference: {
+    excel: r => r.b + '-' + r.a,
     type: 'number',
     label: a => '« ' + a.b + ' » moins « ' + a.a + ' »',
     compute: (row, a) => { const n = twoNumbers(row, a); return n ? round2(n[1] - n[0]) : ''; }
   },
   somme: {
+    excel: r => r.a + '+' + r.b,
     type: 'number',
     label: a => 'Somme de « ' + a.a + ' » et « ' + a.b + ' »',
     compute: (row, a) => { const n = twoNumbers(row, a); return n ? round2(n[0] + n[1]) : ''; }
   },
   produit: {
+    excel: r => r.a + '*' + r.b,
     type: 'number',
     label: a => '« ' + a.a + ' » multiplié par « ' + a.b + ' »',
     compute: (row, a) => { const n = twoNumbers(row, a); return n ? round2(n[0] * n[1]) : ''; }
   },
   pourcentage: {
+    excel: r => 'IF(' + r.b + '=0,"",' + r.a + '/' + r.b + '*100)',
     type: 'number',
     label: a => '« ' + a.a + ' » en % de « ' + a.b + ' »',
     compute: (row, a) => { const n = twoNumbers(row, a); return (n && n[1] !== 0) ? round2(n[0] / n[1] * 100) : ''; }
   },
   partDuTotal: {
+    excel: r => 'IF(SUM(' + r.plageA + ')=0,"",' + r.a + '/SUM(' + r.plageA + ')*100)',
     type: 'number',
     label: a => 'Répartition en % : part de « ' + a.a + ' » dans le total de la colonne',
     context: (sh, a) => {
@@ -1589,6 +1613,7 @@ const FORMULAS = {
     }
   },
   concat: {
+    excel: r => 'TRIM(' + r.a + '&" "&' + r.b + ')',
     type: 'text',
     label: a => '« ' + a.a +' » et « ' + a.b + ' » réunis',
     compute: (row, a) => {
@@ -1597,6 +1622,7 @@ const FORMULAS = {
     }
   },
   domaineMail: {
+    excel: r => 'IFERROR(LOWER(MID(' + r.a + ',FIND("@",' + r.a + ')+1,LEN(' + r.a + '))),"")',
     type: 'text',
     label: a => 'Domaine de « ' + a.a + ' »',
     compute: (row, a) => {
@@ -1606,11 +1632,54 @@ const FORMULAS = {
     }
   },
   longueur: {
+    excel: r => 'IF(' + r.a + '="","",LEN(' + r.a + '))',
     type: 'number',
     label: a => 'Nombre de caractères de « ' + a.a + ' »',
     compute: (row, a) => { const s = String(cellValue(row, a.a) ?? ''); return s === '' ? '' : s.length; }
   }
 };
+
+/* Références à la manière d'un tableur : la colonne devient une lettre, la
+   ligne de données n devient la ligne n+1 puisque la première porte les
+   en-têtes. Les mêmes repères servent à l'affichage et à l'export. */
+function colLettre(i) {
+  let out = '';
+  let n = Number(i);
+  while (n >= 0) { out = String.fromCharCode(65 + (n % 26)) + out; n = Math.floor(n / 26) - 1; }
+  return out;
+}
+
+function refsExcel(sh, args, ligneFeuille, nbLignes) {
+  const out = { ligne: ligneFeuille };
+  let complet = true;
+  ['a', 'b'].forEach(k => {
+    if (!args[k]) return;
+    const i = sh.columns.findIndex(c => c.key === args[k]);
+    if (i < 0) { complet = false; return; }
+    const L = colLettre(i);
+    out[k] = L + ligneFeuille;
+    out['plage' + k.toUpperCase()] = '$' + L + '$2:$' + L + '$' + (nbLignes + 1);
+  });
+  return complet ? out : null;
+}
+
+/* Formule telle qu'elle sera écrite dans le fichier : les noms de fonctions y
+   sont en anglais et les arguments séparés par des virgules. Excel et
+   LibreOffice les traduisent à l'affichage — d'où la version « à l'écran »,
+   avec des points-virgules, la seule qui se retape telle quelle en français.
+   Aucune de nos formules n'a de virgule à l'intérieur d'un texte : la
+   substitution est donc sans danger. */
+function formuleFichier(sh, col, ligneFeuille) {
+  if (!computedColumn(col)) return '';
+  const def = FORMULAS[col.formula.op];
+  if (!def.excel) return '';
+  const r = refsExcel(sh, col.formula.args, ligneFeuille || 2, sh.rows.length || 1);
+  return r ? def.excel(r) : '';
+}
+function formuleAffichee(sh, col, ligneFeuille) {
+  const f = formuleFichier(sh, col, ligneFeuille);
+  return f ? '=' + f.replace(/,/g, ';') : '';
+}
 
 const MOIS_FR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
   'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -1874,14 +1943,35 @@ function workbookSheetNames(names) {
   return { map: map, changed: changed };
 }
 
+/* Une colonne calculée part en formule plutôt qu'en valeur figée : le classeur
+   se recalcule alors dans Excel comme dans LibreOffice. La valeur reste écrite
+   à côté, pour les lecteurs qui n'évaluent rien. */
+function injecterFormules(ws, name) {
+  const sh = sheets[name];
+  const nb = sh.rows.length;
+  sh.columns.forEach((col, ci) => {
+    if (!formuleFichier(sh, col, 2)) return;
+    const def = FORMULAS[col.formula.op];
+    for (let i = 0; i < nb; i++) {
+      const r = refsExcel(sh, col.formula.args, i + 2, nb);
+      if (!r) continue;
+      const cell = ws[XLSX.utils.encode_cell({ c: ci, r: i + 1 })];
+      if (!cell) continue;   // cellule vide : laissée vide plutôt qu'inventée
+      cell.f = def.excel(r);
+    }
+  });
+}
+
 function buildWorkbook() {
   const names = Object.keys(sheets);
   const naming = workbookSheetNames(names);
+  const avecFormules = $('keepFormulas').checked;
   const wb = XLSX.utils.book_new();
   names.forEach(name => {
     const ws = XLSX.utils.json_to_sheet(rowsForExport(name, false), {
       header: headersForExport(name, false), cellDates: true, dateNF: 'dd/mm/yyyy'
     });
+    if (avecFormules) injecterFormules(ws, name);
     XLSX.utils.book_append_sheet(wb, ws, naming.map[name]);
   });
   if (naming.changed.length) log('struct', 'Noms de feuille adaptés pour le classeur : ' + naming.changed.join(', '));
@@ -2223,6 +2313,21 @@ function unfreezeColumn(key) {
   buildForm(); render();
 }
 
+function detailFormule(col, ligne) {
+  if (!computedColumn(col)) return;
+  const def = FORMULAS[col.formula.op];
+  const sources = Object.keys(col.formula.args).map(k => '« ' + col.formula.args[k] + ' »').join(' et ');
+  const f = formuleAffichee(sheet(), col, ligne || 2);
+  alert('Colonne calculée « ' + col.key + ' »\n\n' + def.label(col.formula.args) +
+    '\nCalculée à partir de ' + sources + '.\n\n' +
+    (f ? 'Formule pour la ligne ' + (ligne || 2) + ' :\n' + f + '\n\n' +
+      'Cette formule est écrite telle quelle dans les exports .xlsx et .ods, si la case ' +
+      '« Conserver les colonnes calculées comme formules » est cochée : le classeur se recalcule ' +
+      'alors tout seul dans Excel ou LibreOffice.\n\n'
+      : 'Ce calcul n\'a pas d\'équivalent tableur : il sera exporté en valeurs.\n\n') +
+    'La colonne se met à jour à chaque modification de ses sources. Le menu « ⋮ » permet de la figer en valeurs.');
+}
+
 /* --------------------------------------------------------- menu colonne */
 const colMenu = $('colMenu');
 function openColMenu(key, x, y) {
@@ -2235,7 +2340,10 @@ function openColMenu(key, x, y) {
     ['Insérer une colonne après', () => openColumnDialog(sheet().columns.findIndex(c => c.key === key))],
     ['Supprimer la colonne', () => deleteColumn(key)]
   ];
-  if (computedColumn(col)) actions.splice(3, 0, ['Convertir en valeurs figées', () => unfreezeColumn(key)]);
+  if (computedColumn(col)) {
+    actions.splice(3, 0, ['Voir la formule', () => detailFormule(col, 2)]);
+    actions.splice(4, 0, ['Convertir en valeurs figées', () => unfreezeColumn(key)]);
+  }
   actions.forEach(([label, fn]) => {
     const b = document.createElement('button');
     b.textContent = label;
@@ -2475,6 +2583,8 @@ function renderColumnSuggestions(sh) {
     const main = el('div', 'sugg-main');
     main.appendChild(el('h4', null, s.name));
     main.appendChild(el('p', null, def.label(s.args) + ' — ' + s.why));
+    const formule = formuleAffichee(sh, { formula: { op: s.op, args: s.args } }, 2);
+    if (formule) main.appendChild(el('div', 'formule', 'Formule, pour la ligne 2 : ' + formule));
     main.appendChild(el('div', 'preview', 'Aperçu : ' + s.preview.join(' · ')));
     const act = el('div', 'sugg-actions');
     const btn = el('button', 'btn-primary btn-icon', 'Ajouter');
@@ -2758,7 +2868,8 @@ function buildForm() {
     if (calc) {
       input.disabled = true;
       input.placeholder = FORMULAS[col.formula.op].label(col.formula.args);
-      input.title = 'Cette valeur est calculée automatiquement.';
+      input.title = 'Cette valeur est calculée automatiquement.' +
+        (formuleAffichee(sheet(), col, 2) ? '\n' + formuleAffichee(sheet(), col, 2) : '');
     } else {
       input.placeholder = col.key;
       if (col.guard) input.title = 'Colonne gardée en texte (' + col.guard + ') pour ne pas abîmer les valeurs.';
@@ -2967,7 +3078,9 @@ function renderHead() {
     const calc = computedColumn(col);
     const label = el('span', 'th-label',
       col.key + (calc ? ' ƒ' : '') + (sortCol === col.key ? (sortAsc ? ' ▲' : ' ▼') : ''));
-    label.title = calc ? FORMULAS[col.formula.op].label(col.formula.args) + ' — cliquez pour trier'
+    label.title = calc
+      ? FORMULAS[col.formula.op].label(col.formula.args) +
+        (formuleAffichee(sheet(), col, 2) ? '\n' + formuleAffichee(sheet(), col, 2) : '') + '\nCliquez pour trier'
       : (col.guard ? 'Colonne en texte (' + col.guard + ') — cliquez pour trier' : 'Trier');
     label.addEventListener('click', () => sortBy(col.key));
 
@@ -3043,10 +3156,12 @@ function render() {
       if (col.type === 'date' && display) display = isoToFr(display);
       td.className = (col.type === 'number' ? 'num' : '') + (calc ? ' calc' : '');
       highlightInto(td, display, term);
-      td.title = calc ? 'Valeur calculée : ' + FORMULAS[col.formula.op].label(col.formula.args)
+      td.title = calc
+        ? 'Valeur calculée : ' + FORMULAS[col.formula.op].label(col.formula.args) +
+          (formuleAffichee(sh, col, item.index + 2) ? '\n' + formuleAffichee(sh, col, item.index + 2) : '')
         : 'Double-cliquez pour modifier';
       td.addEventListener('dblclick', () => {
-        if (calc) { alert('« ' + col.key + ' » est une colonne calculée.\n\n' + FORMULAS[col.formula.op].label(col.formula.args) + '\n\nModifiez ses colonnes sources, ou figez-la depuis le menu ⋮.'); return; }
+        if (calc) { detailFormule(col, item.index + 2); return; }
         startInlineEdit(td, item.index, col);
       });
       tr.appendChild(td);
@@ -3284,6 +3399,13 @@ $('libOkCloseBtn').addEventListener('click', () => { $('libOkBanner').style.disp
 function openExportDialog() {
   if (!hasData()) { alert("Chargez un fichier ou créez une feuille avant d'exporter."); return; }
   $('expCsvHint').textContent = 'Un fichier texte contenant la feuille « ' + currentSheet + ' » uniquement.';
+  const calculees = Object.keys(sheets).reduce((n, name) =>
+    n + sheets[name].columns.filter(c => formuleFichier(sheets[name], c, 2)).length, 0);
+  $('formulaHint').textContent = calculees
+    ? calculees + ' colonne(s) calculée(s) partiront en formules dans les classeurs .xlsx et .ods : ' +
+      'le fichier se recalcule tout seul à l\'ouverture, et la valeur figée reste écrite à côté. ' +
+      'Décochez la case pour n\'exporter que les valeurs. Le CSV, lui, ne connaît pas les formules.'
+    : '';
   $('exportNameHint').textContent = 'Les fichiers produits seront nommés « ' + exportBase() + '_' + stamp() +
     ' » : le nom du document et l\'horodatage évitent les (1), (2) dans le dossier de téléchargement.';
   $('exportDialog').showModal();
