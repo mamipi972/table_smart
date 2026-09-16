@@ -125,12 +125,25 @@ la fin d'un commentaire, donc l'outil refuse plutôt que de produire un fichier 
 **Ce que ça coûte.** Environ 1 Mo au total : 132 Ko pour la page, 930 Ko pour la librairie
 en 0.20.3.
 
-**Deux précautions pour qui reprend le projet.** Le fichier fabriqué est enregistré dans le
-dépôt, ce qui ne se fait pas d'habitude pour 1 Mo produit par un outil : c'est le prix à
-payer pour qu'un débutant n'ait qu'un fichier à télécharger. Et comme il peut rester en
-arrière quand `tableur.html` change, `tests/test-sans-librairie.js` compare les deux et
-signale l'écart. Après toute modification de `tableur.html`, relancez donc
-`node outils/integrer-xlsx.js`. Le fichier produit se contrôle avec la suite habituelle :
+**Le fichier fabriqué est enregistré dans le dépôt**, ce qui ne se fait pas d'habitude
+pour 1 Mo produit par un outil : c'est le prix à payer pour qu'un débutant n'ait qu'un
+fichier à télécharger.
+
+**D'où un risque : les deux fichiers peuvent se désynchroniser.** Modifier `tableur.html`
+ne touche pas à `tableur-autonome.html`. Celui-ci continue alors de livrer l'ancienne
+version de l'application, sans que rien ne le signale : on télécharge la page, la
+nouveauté n'y est pas, et on ne comprend pas pourquoi. **Après toute modification de
+`tableur.html`, relancez donc `node outils/integrer-xlsx.js`.**
+
+**Un test y veille**, pour ne pas dépendre de la mémoire de qui modifie le projet :
+`tests/test-sans-librairie.js` retire de chaque fichier le bloc qui contient la librairie,
+compare tout le reste, et échoue si les deux ne coïncident plus — « la page livrée est en
+retard sur la source ».
+
+**Enfin, la suite de tests sait s'exécuter sur le fichier fabriqué** plutôt que sur la
+source. Cela vérifie que la copie fonctionne, et pas seulement l'original : les mêmes 78
+vérifications, sur `tableur-autonome.html`. `TABLEUR=…` est une variable d'environnement,
+c'est-à-dire une valeur donnée au programme pour cette exécution-là seulement.
 
 ```sh
 TABLEUR=tableur-autonome.html node tests/test.js
@@ -431,12 +444,19 @@ the tag too early and cut the page in half, so it is escaped; a line starting wi
 would be read as the end of a comment, so the tool refuses rather than write a broken file.
 The result weighs about 1 MB (132 KB page, 930 KB library at 0.20.3).
 
-Two notes for whoever picks the project up. The built file is tracked in the repository,
-which is not how a 1 MB build product is usually handled: that is the price of a beginner
-having a single file to download. And since it can fall behind `tableur.html`,
-`tests/test-sans-librairie.js` compares the two and reports the gap — so run
-`node outils/integrer-xlsx.js` again after any change to `tableur.html`. The result is
-checked with the usual suite:
+**The built file is tracked in the repository**, which is not how a 1 MB build product is
+usually handled: that is the price of a beginner having a single file to download.
+
+**Hence a risk: the two files can drift apart.** Changing `tableur.html` leaves
+`tableur-autonome.html` untouched, so the shipped page keeps serving the previous version
+of the application with nothing to say so. **After any change to `tableur.html`, run
+`node outils/integrer-xlsx.js` again.** A test watches over it rather than trusting
+memory: `tests/test-sans-librairie.js` strips the library block out of each file, compares
+everything else, and fails when the two no longer match.
+
+**The suite can also run against the built file** instead of the source, which proves the
+copy works and not just the original — the same 78 checks, on `tableur-autonome.html`.
+`TABLEUR=…` is an environment variable: a value handed to the program for that run only.
 
 ```sh
 TABLEUR=tableur-autonome.html node tests/test.js
